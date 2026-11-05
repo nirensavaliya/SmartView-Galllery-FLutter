@@ -1,11 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Screen/Splash/widgets/SplashLoader.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:gallery_photos/View/Constant/App_font.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
 import 'package:gallery_photos/View/Screen/RecycleBin/Controller/RecycleBinController.dart';
 import 'package:gallery_photos/View/Screen/RecycleBin/RecycleBinViewerScreen.dart';
 import 'package:get/get.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
+import 'package:gallery_photos/View/Widget/ChromeDialog.dart';
 
 class RecycleBinScreen extends StatelessWidget {
   RecycleBinScreen({super.key});
@@ -13,28 +17,24 @@ class RecycleBinScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffF1F3F5),
+      backgroundColor: InnerChrome.page,
+      extendBody: true,
       appBar: AppBar(
-        backgroundColor: const Color(0xffF1F3F5),
-        leading: Obx(() {
-          if (controller.isSelectionMode) {
-            return const SizedBox.shrink();
-          }
-          return IconButton(
-            onPressed: () {
-              Get.back();
-            },
-            icon: const Icon(Icons.arrow_back_ios, color: Color(0xff222222)),
-          );
-        }),
+        backgroundColor: InnerChrome.page,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        titleSpacing: 20,
+        toolbarHeight: 72,
         title: Obx(() {
           if (controller.isSelectionMode) {
             return Text(
               "${controller.selectedItems.length} Selected",
               style: TextStyle(
-                fontSize: 20,
-                fontFamily: FontFamily.robotoMedium,
-                color: const Color(0xff222222),
+                fontSize: 22,
+                fontFamily: 'Plus Jakarta Sans',
+                fontWeight: FontWeight.w800,
+                color: InnerChrome.ink,
               ),
             );
           }
@@ -42,45 +42,57 @@ class RecycleBinScreen extends StatelessWidget {
           return Text(
             "Recycle Bin",
             style: TextStyle(
-              fontSize: 20,
-              fontFamily: FontFamily.robotoMedium,
-              color: const Color(0xff222222),
+              fontFamily: 'Plus Jakarta Sans',
+              color: InnerChrome.ink,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
             ),
           );
         }),
-
+        leading: Obx(() {
+          if (controller.isSelectionMode) {
+            return const SizedBox.shrink();
+          }
+          return Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: _RecycleCircleButton(
+              icon: Icons.arrow_back_ios_new_rounded,
+              iconSize: 18,
+              onTap: Get.back,
+            ),
+          );
+        }),
+        leadingWidth: 64,
         actions: [
           Obx(() {
             if (controller.isSelectionMode) {
-              return IconButton(
-                onPressed: () {
-                  controller.clearSelection();
-                },
-                icon: const Icon(Icons.close, color: Color(0xff222222)),
+              return Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: _RecycleCircleButton(
+                  icon: Icons.close_rounded,
+                  onTap: controller.clearSelection,
+                ),
               );
             }
             if (controller.recycleItems.isEmpty) {
               return const SizedBox.shrink();
             }
-            return Row(
-              children: [
-                IconButton(
-                  onPressed: () {
-                    _showDeleteAllDialog(context);
-                  },
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: Color(0xff222222),
+            return Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(
+                children: [
+                  _RecycleCircleButton(
+                    icon: Icons.delete_outline_rounded,
+                    onTap: () => _showDeleteAllDialog(context),
                   ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    _showRestoreAllDialog(context);
-                  },
-                  icon: const Icon(Icons.refresh, color: Color(0xff222222)),
-                ),
-                const SizedBox(width: 4),
-              ],
+                  const SizedBox(width: 8),
+                  _RecycleCircleButton(
+                    icon: Icons.refresh_rounded,
+                    onTap: () => _showRestoreAllDialog(context),
+                  ),
+                ],
+              ),
             );
           }),
         ],
@@ -91,74 +103,49 @@ class RecycleBinScreen extends StatelessWidget {
         }
 
         return SafeArea(
-          child: Container(
-            height: 70,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 8,
-                  offset: Offset(0, -2),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: InkWell(
-                    onTap: () async {
-                      await controller.restoreSelectedItems();
-                    },
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.restore, color: Color(0xff333333)),
-                        const SizedBox(height: 3),
-                        Text(
-                          "Restore",
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontFamily: FontFamily.robotoMedium,
-                            color: const Color(0xff333333),
-                          ),
-                        ),
-                      ],
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: InnerChrome.sheet,
+                borderRadius: BorderRadius.circular(34),
+                border: Border.all(color: InnerChrome.line),
+                boxShadow: InnerChrome.lift,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: _RecycleBarButton(
+                      icon: Icons.delete_outline_rounded,
+                      label: "Delete",
+                      background: InnerChrome.dangerBg,
+                      foreground: InnerChrome.danger,
+                      onTap: () => _showSelectedDeleteDialog(context),
                     ),
                   ),
-                ),
-
-                Expanded(
-                  child: InkWell(
-                    onTap: () {
-                      _showSelectedDeleteDialog(context);
-                    },
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.delete_outline, color: Colors.red),
-                        const SizedBox(height: 3),
-                        Text(
-                          "Delete",
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontFamily: FontFamily.robotoMedium,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 6,
+                    child: _RecycleBarButton(
+                      icon: Icons.restore_rounded,
+                      label: "Restore",
+                      background: InnerChrome.pick,
+                      foreground: Colors.white,
+                      filled: true,
+                      onTap: controller.restoreSelectedItems,
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
       }),
       body: Obx(() {
         if (controller.isLoading.value) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: SplashLoader());
         }
         if (controller.recycleItems.isEmpty) {
           return _emptyView();
@@ -176,37 +163,47 @@ class RecycleBinScreen extends StatelessWidget {
   Widget _infoBar() {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
+        color: InnerChrome.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: InnerChrome.line),
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, size: 20, color: Color(0xff555555)),
-
-          const SizedBox(width: 10),
-
+          Icon(
+            Icons.info_outline_rounded,
+            size: 20,
+            color: InnerChrome.muted,
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               "Items in recycle bin clear after 30 days.",
               style: TextStyle(
+                fontFamily: 'Plus Jakarta Sans',
                 fontSize: 13,
-                fontFamily: FontFamily.robotoRegular,
-                color: const Color(0xff555555),
+                color: InnerChrome.muted,
               ),
             ),
           ),
-          const SizedBox(width: 10),
-
           Obx(
-            () => Transform.scale(
-              scale: 0.6,
-              child: Switch(
-                value: controller.autoClearAfter30Days.value,
-                onChanged: controller.toggleAutoClear,
-              ),
+            () => Switch(
+              value: controller.autoClearAfter30Days.value,
+              onChanged: controller.toggleAutoClear,
+              thumbColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return Colors.white;
+                }
+                return InnerChrome.muted;
+              }),
+              trackColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return InnerChrome.accent;
+                }
+                return InnerChrome.alt;
+              }),
             ),
           ),
         ],
@@ -232,8 +229,8 @@ class RecycleBinScreen extends StatelessWidget {
             "Recycle Bin is empty",
             style: TextStyle(
               fontSize: 16,
-              fontFamily: FontFamily.robotoMedium,
-              color: const Color(0xff333333),
+              fontWeight: FontWeight.w600,
+              color: InnerChrome.ink,
             ),
           ),
 
@@ -243,8 +240,7 @@ class RecycleBinScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 13,
-              fontFamily: FontFamily.robotoRegular,
-              color: const Color(0xff888888),
+              color: InnerChrome.muted,
             ),
           ),
         ],
@@ -256,7 +252,7 @@ class RecycleBinScreen extends StatelessWidget {
     final grouped = controller.groupedItems;
 
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 120),
       itemCount: grouped.length,
       itemBuilder: (context, index) {
         final month = grouped.keys.elementAt(index);
@@ -266,13 +262,14 @@ class RecycleBinScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(left: 4, top: 6, bottom: 8),
+              padding: const EdgeInsets.only(left: 0, top: 18, bottom: 10),
               child: Text(
                 month,
                 style: TextStyle(
                   fontSize: 15,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff333333),
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Plus Jakarta Sans',
+                  color: InnerChrome.ink,
                 ),
               ),
             ),
@@ -282,8 +279,8 @@ class RecycleBinScreen extends StatelessWidget {
               itemCount: items.length,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
-                crossAxisSpacing: 3,
-                mainAxisSpacing: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
                 childAspectRatio: 1,
               ),
               itemBuilder: (context, index) {
@@ -314,19 +311,28 @@ class RecycleBinScreen extends StatelessWidget {
         onLongPress: () {
           controller.startSelection(item);
         },
-        child: Stack(
+        child: Container(
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: selected
+                ? Border.all(color: InnerChrome.pick, width: 2)
+                : null,
+          ),
+          child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
           fit: StackFit.expand,
           children: [
             Image.file(
               File(item.recyclePath),
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: const Color(0xffDDDDDD),
-                  child: const Icon(
+                return ColoredBox(
+                  color: InnerChrome.alt,
+                  child: Icon(
                     Icons.broken_image_outlined,
                     size: 32,
-                    color: Color(0xff888888),
+                    color: InnerChrome.muted,
                   ),
                 );
               },
@@ -342,40 +348,46 @@ class RecycleBinScreen extends StatelessWidget {
                   color: Colors.white,
                 ),
               ),
+            if (selected) Container(color: Colors.black26),
             if (selectionMode)
               Positioned(
-                left: 6,
-                top: 6,
+                left: 8,
+                top: 8,
                 child: GestureDetector(
                   onTap: () {
                     controller.toggleSelection(item);
                   },
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xff2196F3) : Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xff2196F3)
-                            : Colors.white,
-                        width: 2,
-                      ),
-                    ),
-                    child: selected
-                        ? const Icon(Icons.check, size: 16, color: Colors.white)
-                        : null,
-                  ),
-                ),
-              ),
-            if (selected)
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.15),
+                  child: selected
+                      ? Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: InnerChrome.pick,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.check_rounded,
+                            size: 16,
+                            color: InnerChrome.pickInk,
+                          ),
+                        )
+                      : Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.black26,
+                            border: Border.all(
+                              color: Colors.white54,
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
                 ),
               ),
           ],
+        ),
+        ),
         ),
       );
     });
@@ -385,63 +397,20 @@ class RecycleBinScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-
-          title: Text(
-            "Empty Recycle Bin?",
-            style: TextStyle(
-              fontSize: 18,
-              fontFamily: FontFamily.robotoBold,
-              color: const Color(0xff222222),
-            ),
-          ),
-
-          content: Text(
-            "Are you sure you want to permanently delete all files from the Recycle Bin?\n\n"
-            "Once deleted, these files cannot be restored.",
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.4,
-              fontFamily: FontFamily.robotoRegular,
-              color: const Color(0xff555555),
-            ),
-          ),
-
+        return ChromeDialog(
+          title: 'Empty Recycle Bin?',
+          message:
+              'Are you sure you want to permanently delete all files from the Recycle Bin?\n\nOnce deleted, these files cannot be restored.',
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: Text(
-                "Cancel",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff555555),
-                ),
-              ),
+            ChromeButton.cancel(
+              onPressed: () => Navigator.pop(dialogContext),
             ),
-
-            TextButton(
+            ChromeButton.danger(
+              label: 'Delete All',
               onPressed: () async {
                 Navigator.pop(dialogContext);
                 await controller.permanentlyDeleteAll();
               },
-              child: Text(
-                "Delete All",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: Colors.red,
-                ),
-              ),
             ),
           ],
         );
@@ -453,63 +422,20 @@ class RecycleBinScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-
-          title: Text(
-            "Delete selected files?",
-            style: TextStyle(
-              fontSize: 18,
-              fontFamily: FontFamily.robotoBold,
-              color: const Color(0xff222222),
-            ),
-          ),
-
-          content: Text(
-            "Are you sure you want to permanently delete the selected files?\n\n"
-            "Once deleted, these files cannot be restored.",
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.4,
-              fontFamily: FontFamily.robotoRegular,
-              color: const Color(0xff555555),
-            ),
-          ),
-
+        return ChromeDialog(
+          title: 'Delete selected files?',
+          message:
+              'Are you sure you want to permanently delete the selected files?\n\nOnce deleted, these files cannot be restored.',
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: Text(
-                "Cancel",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff555555),
-                ),
-              ),
+            ChromeButton.cancel(
+              onPressed: () => Navigator.pop(dialogContext),
             ),
-
-            TextButton(
+            ChromeButton.danger(
+              label: 'Delete',
               onPressed: () async {
                 Navigator.pop(dialogContext);
                 await controller.permanentlyDeleteSelectedItems();
               },
-              child: Text(
-                "Delete",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: Colors.red,
-                ),
-              ),
             ),
           ],
         );
@@ -521,57 +447,106 @@ class RecycleBinScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          title: Text(
-            "Restore all files?",
-            style: TextStyle(
-              fontSize: 18,
-              fontFamily: FontFamily.robotoBold,
-              color: const Color(0xff222222),
-            ),
-          ),
-          content: Text(
-            "Are you sure you want to restore all files?",
-            style: TextStyle(
-              fontSize: 14,
-              fontFamily: FontFamily.robotoRegular,
-              color: const Color(0xff555555),
-            ),
-          ),
+        return ChromeDialog(
+          title: 'Restore all files?',
+          message: 'Are you sure you want to restore all files?',
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text("Cancel"),
+            ChromeButton.cancel(
+              onPressed: () => Navigator.pop(dialogContext),
             ),
-            TextButton(
+            ChromeButton.ok(
               onPressed: () async {
                 Navigator.pop(dialogContext);
-
                 await controller.restoreAllItems();
-
                 if (Get.isRegistered<PhotosController>()) {
                   final photosController = Get.find<PhotosController>();
                   await photosController.refreshMedia();
                 }
                 Get.back();
               },
-              child: Text(
-                "OK",
-                style: TextStyle(
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff333333),
-                ),
-              ),
             ),
           ],
         );
       },
+    );
+  }
+}
+
+class _RecycleCircleButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final double iconSize;
+
+  const _RecycleCircleButton({
+    required this.icon,
+    required this.onTap,
+    this.iconSize = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: InnerChrome.alt,
+          shape: BoxShape.circle,
+          border: Border.all(color: InnerChrome.line),
+        ),
+        child: Icon(icon, size: iconSize, color: InnerChrome.ink),
+      ),
+    );
+  }
+}
+
+class _RecycleBarButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color background;
+  final Color foreground;
+  final VoidCallback onTap;
+  final bool filled;
+
+  const _RecycleBarButton({
+    required this.icon,
+    required this.label,
+    required this.background,
+    required this.foreground,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: filled ? null : background,
+          gradient: filled ? InnerChrome.actionGradient : null,
+          boxShadow: filled ? InnerChrome.actionShadow : null,
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 20, color: foreground),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontFamily: 'Plus Jakarta Sans',
+                fontWeight: FontWeight.w700,
+                color: foreground,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

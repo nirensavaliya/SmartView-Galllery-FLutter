@@ -1,27 +1,41 @@
 import 'dart:async';
+import 'dart:developer';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:flutter/services.dart';
+import 'package:gallery_photos/Common/MediaActionService.dart';
 import 'package:gallery_photos/Common/MediaManager.dart';
+import 'package:gallery_photos/Common/SmartSearchService.dart';
 import 'package:gallery_photos/View/Constant/Get_Storage.dart';
 import 'package:gallery_photos/View/Screen/Albums/AlbumsScreen.dart';
+import 'package:gallery_photos/View/Screen/Albums/Controller/AlbumsController.dart';
+import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
+import 'package:gallery_photos/View/Screen/Photos/Controller/PhotoViewController.dart';
+import 'package:gallery_photos/View/Screen/Photos/Controller/SmartSearchController.dart';
+import 'package:gallery_photos/View/Screen/RecycleBin/Controller/RecycleBinController.dart';
+import 'package:gallery_photos/View/Setting/FileOperationService.dart';
 import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class PhotosController extends GetxController {
   final RxList<AssetEntity> allMedia = <AssetEntity>[].obs;
   final RxList<AssetEntity> filteredMedia = <AssetEntity>[].obs;
   final Rxn<DateTime> selectedDate = Rxn<DateTime>();
   final RxBool firstPageLoaded = false.obs;
+  Future<void>? _initialMediaLoad;
   final RxInt crossAxisCount = 3.obs;
   int _startCrossAxisCount = 3;
   double _lastScale = 1.0;
   bool isLoadingMore = false;
+  final RxBool isAlbumSelectionMode = false.obs;
   int currentPage = 0;
   static const int pageSize = 100;
-  final ImagePicker _picker = ImagePicker();
   final RxBool filterImages = true.obs;
   final RxBool filterVideos = true.obs;
   final RxBool filterGifs = true.obs;
@@ -30,7 +44,112 @@ class PhotosController extends GetxController {
   final RxBool filterPortraits = false.obs;
   final RxString sortBy = "Last modified".obs;
   final RxBool sortAscending = false.obs;
+  final RxString searchQuery = ''.obs;
+  final RxBool isSearching = false.obs;
   final Map<String, Uint8List> thumbnailCache = {};
+  static const int _maxThumbnailCache = 400;
+  final SmartSearchController smartSearchController =
+  Get.put(SmartSearchController());
+  List<GroupSection>? _groupedCache;
+  String _groupedSignature = '';
+  List<GalleryRow>? _rowsCache;
+  int _rowsColumns = -1;
+  Timer? _searchTimer;
+  void invalidateGalleryCache() {
+    _groupedCache = null;
+    _groupedSignature = '';
+    _rowsCache = null;
+    _rowsColumns = -1;
+  }
+  Future<void> searchPhotos(String query) async {
+    _searchTimer?.cancel();
+
+    final text = query.trim().toLowerCase();
+
+    searchQuery.value = text;
+
+    if (text.isEmpty) {
+      smartSearchController.isAnalyzing.value = false;
+      await applyMediaFilter();
+      return;
+    }
+
+    _searchTimer = Timer(
+      const Duration(milliseconds: 350),
+          () async {
+        if (searchQuery.value != text) {
+          return;
+        }
+
+        smartSearchController.isAnalyzing.value = true;
+
+        try {
+          final results =
+          await smartSearchController.searchByImageContent(
+            allMedia.toList(),
+            text,
+          );
+
+          if (searchQuery.value != text) {
+            return;
+          }
+
+          final byId = <String, AssetEntity>{
+            for (final asset in results) asset.id: asset,
+          };
+          for (final asset in allMedia) {
+            if (SmartSearchService.instance.assetMatchesQuery(asset, text)) {
+              byId.putIfAbsent(asset.id, () => asset);
+            }
+          }
+
+          filteredMedia.assignAll(byId.values.toList());
+
+          debugPrint(
+            "SMART SEARCH => $text | RESULTS => ${results.length}",
+          );
+        } catch (e) {
+          debugPrint("Search Error => $e");
+
+          if (searchQuery.value == text) {
+            filteredMedia.clear();
+          }
+        } finally {
+          if (searchQuery.value == text) {
+            smartSearchController.isAnalyzing.value = false;
+          }
+        }
+      },
+    );
+  }
+
+
+  Future<void> _indexSmartSearch() async {
+    try {
+      await SmartSearchService.instance.init();
+      for (var i = 0; i < 20 && allMedia.isEmpty; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      if (allMedia.isEmpty) return;
+      await SmartSearchService.instance.indexAssets(allMedia.toList());
+    } catch (e) {
+      debugPrint("SmartSearch indexing failed: $e");
+    }
+  }
+
+  void trimThumbnailCache({int keep = 60}) {
+    if (thumbnailCache.length <= keep) {
+      return;
+    }
+
+    final keys = thumbnailCache.keys.toList();
+    final removeCount = thumbnailCache.length - keep;
+
+    for (int i = 0; i < removeCount; i++) {
+      thumbnailCache.remove(keys[i]);
+    }
+  }
+
   bool _isRawImage(String title, String mime) {
     const rawExtensions = [
       ".raw",
@@ -57,12 +176,121 @@ class PhotosController extends GetxController {
   final RxString groupBy = "Last modified (daily)".obs;
   final RxBool groupAscending = false.obs;
   final RxBool showFileCount = false.obs;
+  final RxSet<String> selectedMediaIds = <String>{}.obs;
+  final RxBool isSelectionMode = false.obs;
+
+  final RxBool isDragSelecting = false.obs;
+
+  final Map<String, GlobalKey> _selectionKeys = {};
+
+  Offset? _dragStartPosition;
+  String? _dragStartAssetId;
+  String? _lastDragSelectedId;
+
+  GlobalKey selectionKeyFor(String assetId) {
+    return _selectionKeys.putIfAbsent(assetId, () => GlobalKey());
+  }
+
+  void removeSelectionKey(String assetId) {
+    _selectionKeys.remove(assetId);
+  }
+
+  void startDragSelection(AssetEntity asset, Offset position) {
+    _dragStartPosition = position;
+    _dragStartAssetId = asset.id;
+    _lastDragSelectedId = null;
+    isDragSelecting.value = false;
+  }
+
+  void updateDragSelection(Offset position) {
+    if (_dragStartPosition == null || _dragStartAssetId == null) {
+      return;
+    }
+
+    final distance = (position - _dragStartPosition!).distance;
+    if (!isDragSelecting.value && distance < 8) {
+      return;
+    }
+
+    if (!isDragSelecting.value) {
+      isDragSelecting.value = true;
+      final firstAsset = _findAssetById(_dragStartAssetId!);
+
+      if (firstAsset != null) {
+        startPhotoSelection(firstAsset);
+        _lastDragSelectedId = firstAsset.id;
+      }
+    }
+
+    final asset = _assetAtPosition(position);
+
+    if (asset == null) {
+      return;
+    }
+    if (_lastDragSelectedId == asset.id) {
+      return;
+    }
+
+    _lastDragSelectedId = asset.id;
+
+    if (!selectedMediaIds.contains(asset.id)) {
+      selectedMediaIds.add(asset.id);
+      selectedMediaIds.refresh();
+    }
+  }
+
+  AssetEntity? _findAssetById(String id) {
+    for (final asset in filteredMedia) {
+      if (asset.id == id) {
+        return asset;
+      }
+    }
+
+    return null;
+  }
+
+  AssetEntity? _assetAtPosition(Offset position) {
+    for (final entry in _selectionKeys.entries) {
+      final key = entry.value;
+      final context = key.currentContext;
+
+      if (context == null) {
+        continue;
+      }
+
+      final renderObject = context.findRenderObject();
+
+      if (renderObject is! RenderBox || !renderObject.hasSize) {
+        continue;
+      }
+
+      final topLeft = renderObject.localToGlobal(Offset.zero);
+      final rect = topLeft & renderObject.size;
+      if (rect.contains(position)) {
+        return _findAssetById(entry.key);
+      }
+    }
+
+    return null;
+  }
+
+  void endDragSelection() {
+    _dragStartPosition = null;
+    _dragStartAssetId = null;
+    _lastDragSelectedId = null;
+
+    isDragSelecting.value = false;
+  }
+
   @override
   void onInit() {
     super.onInit();
-
-    // loadInitialMedia();
     loadSavedGridColumns();
+    ever<List<AssetEntity>>(filteredMedia, (_) => invalidateGalleryCache());
+    ever<String>(groupBy, (_) => invalidateGalleryCache());
+    ever<bool>(groupAscending, (_) => invalidateGalleryCache());
+    ever<bool>(showFileCount, (_) => invalidateGalleryCache());
+    ever<int>(crossAxisCount, (_) => invalidateGalleryCache());
   }
 
   Future<void> refreshMedia() async {
@@ -89,15 +317,302 @@ class PhotosController extends GetxController {
 
       currentPage = 0;
 
+      thumbnailCache.clear();
+
       await applyMediaFilter();
 
       firstPageLoaded.value = true;
 
-      print("MEDIA REFRESHED ONCE: ${allMedia.length}");
+      log("MEDIA REFRESHED ONCE: ${allMedia.length}");
     } catch (e) {
-      print("Refresh Media Error: $e");
+      log("Refresh Media Error: $e");
     } finally {
       isLoadingMore = false;
+
+      unawaited(loadRemainingMediaInBackground());
+    }
+  }
+
+  void startPhotoSelection(AssetEntity asset) {
+    isSelectionMode.value = true;
+
+    selectedMediaIds.clear();
+    selectedMediaIds.add(asset.id);
+
+    selectedMediaIds.refresh();
+  }
+
+  void togglePhotoSelection(AssetEntity asset) {
+    if (selectedMediaIds.contains(asset.id)) {
+      selectedMediaIds.remove(asset.id);
+    } else {
+      selectedMediaIds.add(asset.id);
+    }
+
+    if (selectedMediaIds.isEmpty) {
+      isSelectionMode.value = false;
+    }
+
+    selectedMediaIds.refresh();
+  }
+
+  bool isPhotoSelected(AssetEntity asset) {
+    return selectedMediaIds.contains(asset.id);
+  }
+
+  void selectAllPhotos() {
+    if (filteredMedia.isEmpty) return;
+
+    final bool allSelected = filteredMedia.every(
+      (asset) => selectedMediaIds.contains(asset.id),
+    );
+
+    if (allSelected) {
+      selectedMediaIds.clear();
+      isSelectionMode.value = false;
+    } else {
+      isSelectionMode.value = true;
+      selectedMediaIds
+        ..clear()
+        ..addAll(filteredMedia.map((asset) => asset.id));
+    }
+
+    selectedMediaIds.refresh();
+  }
+
+  void clearPhotoSelection() {
+    selectedMediaIds.clear();
+    isSelectionMode.value = false;
+    selectedMediaIds.refresh();
+  }
+
+  List<AssetEntity> getSelectedAssets() {
+    return filteredMedia
+        .where((asset) => selectedMediaIds.contains(asset.id))
+        .toList();
+  }
+
+  AssetEntity? getFirstSelected() {
+    for (final asset in filteredMedia) {
+      if (selectedMediaIds.contains(asset.id)) {
+        return asset;
+      }
+    }
+
+    return null;
+  }
+
+  PhotoViewController? _getSelectedPhotoController() {
+    final AssetEntity? asset = getFirstSelected();
+
+    if (asset == null) {
+      return null;
+    }
+
+    final PhotoViewController controller = PhotoViewController(
+      asset,
+      albumMedia: filteredMedia.toList(),
+    );
+
+    controller.initializePhotoView();
+
+    return controller;
+  }
+
+  PhotoViewController _photoControllerForBatch(List<AssetEntity> assets) {
+    return PhotoViewController(
+      assets.first,
+      albumMedia: filteredMedia.toList(),
+    );
+  }
+
+  bool _requireSingleSelection(String actionName) {
+    if (selectedMediaIds.length > 1) {
+      AppToast.show("Please select only one item for $actionName");
+
+      return false;
+    }
+
+    return true;
+  }
+
+Future<void> shareSelected() async {
+    final assets = getSelectedAssets();
+
+    if (assets.isEmpty) {
+      return;
+    }
+
+    final controller = _photoControllerForBatch(assets);
+
+    await controller.shareAssets(assets);
+  }
+
+Future<void> lockSelected() async {
+    final assets = getSelectedAssets();
+
+    if (assets.isEmpty) {
+      return;
+    }
+
+    final controller = _photoControllerForBatch(assets);
+
+    final hiddenIds = await controller.hideAssets(assets);
+
+    if (hiddenIds.isNotEmpty) {
+      allMedia.removeWhere((asset) => hiddenIds.contains(asset.id));
+
+      filteredMedia.removeWhere((asset) => hiddenIds.contains(asset.id));
+
+      for (final id in hiddenIds) {
+        thumbnailCache.remove(id);
+      }
+
+      allMedia.refresh();
+      filteredMedia.refresh();
+    }
+
+    clearPhotoSelection();
+  }
+
+Future<void> copySelected() async {
+    final assets = getSelectedAssets();
+
+    if (assets.isEmpty) {
+      return;
+    }
+
+    final controller = _photoControllerForBatch(assets);
+
+    await controller.copyAssets(assets);
+
+    clearPhotoSelection();
+  }
+
+Future<void> moveSelected() async {
+    final assets = getSelectedAssets();
+
+    if (assets.isEmpty) {
+      return;
+    }
+
+    final controller = _photoControllerForBatch(assets);
+
+    final movedIds = await controller.moveAssets(assets);
+
+    if (movedIds.isNotEmpty) {
+      allMedia.removeWhere((asset) => movedIds.contains(asset.id));
+
+      filteredMedia.removeWhere((asset) => movedIds.contains(asset.id));
+
+      for (final id in movedIds) {
+        thumbnailCache.remove(id);
+      }
+
+      allMedia.refresh();
+      filteredMedia.refresh();
+    }
+
+    clearPhotoSelection();
+  }
+
+Future<void> renameSelected() async {
+    if (!_requireSingleSelection("Rename")) {
+      return;
+    }
+
+    final controller = _getSelectedPhotoController();
+
+    if (controller == null) {
+      return;
+    }
+
+    await controller.renamePhoto();
+
+    await refreshMedia();
+
+    clearPhotoSelection();
+  }
+
+Future<void> editSelected() async {
+    if (!_requireSingleSelection("Edit")) {
+      return;
+    }
+
+    final controller = _getSelectedPhotoController();
+
+    if (controller == null) {
+      return;
+    }
+
+    await controller.editPhoto();
+  }
+
+Future<void> setAsSelected() async {
+    if (!_requireSingleSelection("Set as wallpaper")) {
+      return;
+    }
+
+    final controller = _getSelectedPhotoController();
+
+    if (controller == null) {
+      return;
+    }
+
+    await controller.setAsWallpaper();
+  }
+
+Future<void> resizeSelected() async {
+    if (!_requireSingleSelection("Resize")) {
+      return;
+    }
+
+    final controller = _getSelectedPhotoController();
+
+    if (controller == null) {
+      return;
+    }
+
+    await controller.resizePhoto();
+  }
+
+Future<void> infoSelected() async {
+    if (!_requireSingleSelection("Info")) {
+      return;
+    }
+
+    final controller = _getSelectedPhotoController();
+
+    if (controller == null) {
+      return;
+    }
+
+    await controller.showDetails();
+  }
+
+Future<void> deleteSelected() async {
+    await deleteSelectedPhotos();
+  }
+
+Future<void> favoriteSelected() async {
+    final assets = getSelectedAssets();
+
+    if (assets.isEmpty) {
+      return;
+    }
+
+    try {
+      for (final asset in assets) {
+        await PhotoManager.plugin.favoriteAsset(asset.id, true);
+      }
+
+      clearPhotoSelection();
+
+      AppToast.show("${assets.length} items added to favorites");
+    } catch (e) {
+      debugPrint("Favorite Selected Error => $e");
+
+      AppToast.show("Unable to add selected items to favorites");
     }
   }
 
@@ -179,40 +694,7 @@ class PhotosController extends GetxController {
     );
   }
 
-  // Future<void> loadInitialMedia() async {
-  //   try {
-  //     final result = await MediaManger.getAllMedia(
-  //       page: 0,
-  //       size: pageSize,
-  //     );
-  //
-  //     if (result.isNotEmpty) {
-  //       allMedia.assignAll(result);
-  //       applyMediaFilter();
-  //
-  //       currentPage = 0;
-  //     }
-  //
-  //     firstPageLoaded.value = true;
-  //
-  //     print(
-  //       "Initial Media Loaded: ${result.length}",
-  //     );
-  //
-  //     unawaited(
-  //       loadRemainingMedia(),
-  //     );
-  //   } catch (e) {
-  //     print(
-  //       "Initial Media Error: $e",
-  //     );
-  //
-  //     firstPageLoaded.value = true;
-  //   }
-  // }
-
-
-  Future<Uint8List?> getThumbnail(AssetEntity asset) async {
+Future<Uint8List?> getThumbnail(AssetEntity asset) async {
     final cachedThumbnail = thumbnailCache[asset.id];
 
     if (cachedThumbnail != null) {
@@ -224,11 +706,132 @@ class PhotosController extends GetxController {
     );
 
     if (thumbnail != null) {
+      if (thumbnailCache.length >= _maxThumbnailCache) {
+        final oldestKeys = thumbnailCache.keys
+            .take(thumbnailCache.length - _maxThumbnailCache + 1)
+            .toList();
+
+        for (final key in oldestKeys) {
+          thumbnailCache.remove(key);
+        }
+      }
+
       thumbnailCache[asset.id] = thumbnail;
     }
 
     return thumbnail;
   }
+
+  Future<void> loadInitialMediaFast() {
+    return _initialMediaLoad ??= _loadInitialMediaFast().whenComplete(() {
+      _initialMediaLoad = null;
+    });
+  }
+
+  Future<void> _loadInitialMediaFast() async {
+    try {
+      firstPageLoaded.value = false;
+
+      final result = await MediaManger.getAllMedia(page: 0, size: pageSize);
+
+      final loadedIds = <String>{};
+      final loadedMedia = <AssetEntity>[];
+
+      for (final asset in result) {
+        if (loadedIds.add(asset.id)) {
+          loadedMedia.add(asset);
+        }
+      }
+
+      allMedia.assignAll(loadedMedia);
+
+      currentPage = 0;
+
+      await applyMediaFilter();
+
+      firstPageLoaded.value = true;
+    } catch (e) {
+      debugPrint("Fast Media Load Error: $e");
+
+      firstPageLoaded.value = true;
+    }
+  }
+
+  Future<void> loadRemainingMediaInBackground() async {
+    if (isLoadingMore) {
+      return;
+    }
+
+    isLoadingMore = true;
+
+    try {
+      int page = currentPage + 1;
+      int pagesSinceRefresh = 0;
+      bool addedAnything = false;
+
+      final existingIds = allMedia.map((e) => e.id).toSet();
+
+      while (true) {
+        final result = await MediaManger.getAllMedia(
+          page: page,
+          size: pageSize,
+        );
+
+        if (result.isEmpty) {
+          break;
+        }
+
+        final newMedia = <AssetEntity>[];
+
+        for (final asset in result) {
+          if (hiddenAssetIds.contains(asset.id)) {
+            continue;
+          }
+          if (existingIds.add(asset.id)) {
+            newMedia.add(asset);
+          }
+        }
+
+        if (newMedia.isNotEmpty) {
+          allMedia.addAll(newMedia);
+          addedAnything = true;
+          pagesSinceRefresh++;
+        }
+
+        currentPage = page;
+
+        if (pagesSinceRefresh >= 10) {
+          pagesSinceRefresh = 0;
+          await applyMediaFilter();
+        }
+
+        if (result.length < pageSize) {
+          break;
+        }
+
+        page++;
+
+        await Future.delayed(const Duration(milliseconds: 120));
+      }
+
+      if (addedAnything) {
+        await applyMediaFilter();
+      }
+
+      debugPrint("ALL MEDIA LOADED (background): ${allMedia.length}");
+    } catch (e) {
+      debugPrint("Background Media Error: $e");
+    } finally {
+      isLoadingMore = false;
+    }
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 5), () {
+        if (isClosed) return;
+        _indexSmartSearch();
+      }),
+    );
+  }
+
   Future<void> loadInitialMedia() async {
     try {
       firstPageLoaded.value = false;
@@ -263,12 +866,10 @@ class PhotosController extends GetxController {
         page++;
       }
 
-      // Complete gallery data ek hi baar assign hoga.
       allMedia.assignAll(loadedMedia);
 
       currentPage = page;
 
-      // Filter + sort sirf ek baar.
       await applyMediaFilter();
 
       firstPageLoaded.value = true;
@@ -307,53 +908,25 @@ class PhotosController extends GetxController {
         final existingIds = allMedia.map((e) => e.id).toSet();
 
         final newMedia = result
-            .where((asset) => !existingIds.contains(asset.id))
+            .where(
+              (asset) =>
+                  !hiddenAssetIds.contains(asset.id) &&
+                  !existingIds.contains(asset.id),
+            )
             .toList();
-
-        // if (newMedia.isNotEmpty) {
-        //   allMedia.addAll(newMedia);
-        //
-        //   if (selectedDate.value == null) {
-        //     filteredMedia.addAll(newMedia);
-        //   } else {
-        //     final selected = selectedDate.value!;
-        //
-        //     final filtered = newMedia.where((asset) {
-        //       final date = asset.createDateTime;
-        //
-        //       return date.year == selected.year &&
-        //           date.month == selected.month &&
-        //           date.day == selected.day;
-        //     }).toList();
-        //
-        //     if (filtered.isNotEmpty) {
-        //       filteredMedia.addAll(filtered);
-        //     }
-        //   }
-        // }
         if (newMedia.isNotEmpty) {
           allMedia.addAll(newMedia);
-
           filteredMedia.addAll(newMedia);
         }
-        print("Background Page $page : ${result.length}");
-
-        print("Total Media: ${allMedia.length}");
-
+        log("Background Page $page : ${result.length}");
+        log("Total Media: ${allMedia.length}");
         if (result.length < pageSize) {
           break;
         }
-
         page++;
       }
-
-      print("================================");
-
-      print("ALL MEDIA LOADED: ${allMedia.length}");
-
-      print("================================");
     } catch (e) {
-      print("Background Media Error: $e");
+      log("Background Media Error: $e");
     } finally {
       isLoadingMore = false;
     }
@@ -362,32 +935,109 @@ class PhotosController extends GetxController {
   void filterByDate(DateTime date) {
     selectedDate.value = date;
     applyMediaFilter();
-    print(
+    log(
       "Selected Date: "
       "${date.day}/${date.month}/${date.year}",
     );
-    print("Filtered Media: ${filteredMedia.length}");
+    log("Filtered Media: ${filteredMedia.length}");
+  }
+
+  bool _watchNewPhotos = false;
+  int _newPhotoTries = 0;
+  Future<void>? _pullingNewPhotos;
+
+  void watchForNewPhotos() {
+    _watchNewPhotos = true;
+    _newPhotoTries = 0;
+  }
+
+  Future<void> showNewPhotosNow() {
+    return _pullingNewPhotos ??= _prependMissingRecent().then((bool added) async {
+      if (!added) {
+        _refreshAlbumsOnce();
+      }
+      await _refreshUtilityCounts();
+    }).whenComplete(() {
+      _pullingNewPhotos = null;
+    });
+  }
+
+  Future<void> pullNewPhotosIfNeeded() {
+    if (!_watchNewPhotos || _newPhotoTries >= 4) {
+      return Future<void>.value();
+    }
+    return _pullingNewPhotos ??= _pullNewPhotos().whenComplete(() {
+      _pullingNewPhotos = null;
+    });
+  }
+
+  Future<void> _pullNewPhotos() async {
+    if (!_watchNewPhotos) return;
+    _newPhotoTries++;
+    final bool added = await _prependMissingRecent();
+    if (added) {
+      await _refreshUtilityCounts();
+    }
+    if (added || _newPhotoTries >= 4) {
+      _watchNewPhotos = false;
+    }
+  }
+
+  Future<bool> _prependMissingRecent() async {
+    try {
+      try {
+        await PhotoManager.clearFileCache();
+      } catch (_) {}
+
+      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
+        type: RequestType.common,
+        onlyAll: true,
+      );
+      if (paths.isEmpty) return false;
+
+      final List<AssetEntity> recent = await paths.first.getAssetListRange(
+        start: 0,
+        end: 40,
+      );
+      final Set<String> known = allMedia.map((asset) => asset.id).toSet();
+      final List<AssetEntity> fresh = recent
+          .where(
+            (asset) =>
+                !hiddenAssetIds.contains(asset.id) && known.add(asset.id),
+          )
+          .toList();
+      if (fresh.isEmpty) return false;
+
+      allMedia.insertAll(0, fresh);
+      await applyMediaFilter();
+      _refreshAlbumsOnce();
+      return true;
+    } catch (e) {
+      debugPrint('NEW PHOTO REFRESH ERROR: $e');
+      return false;
+    }
+  }
+
+  void _refreshAlbumsOnce() {
+    if (!Get.isRegistered<AlbumsController>()) return;
+    Get.find<AlbumsController>().refreshAfterNewPhotos();
+  }
+
+  Future<void> _refreshUtilityCounts() {
+    if (!Get.isRegistered<ForYouController>()) return Future<void>.value();
+    return Get.find<ForYouController>().refreshScreenshotAndVideoCounts();
   }
 
   Future<void> openCamera() async {
+    watchForNewPhotos();
     try {
       await const MethodChannel('native_camera').invokeMethod('openCamera');
     } on PlatformException catch (e) {
       debugPrint("Native Camera Error => ${e.code} : ${e.message}");
-
-      Get.snackbar(
-        "Camera Error",
-        e.message ?? "Unable to open camera",
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show(e.message ?? "Unable to open camera");
     } catch (e) {
       debugPrint("Camera Error => $e");
-
-      Get.snackbar(
-        "Camera Error",
-        e.toString(),
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show("Camera Error: ${e.toString()}");
     }
   }
 
@@ -397,13 +1047,63 @@ class PhotosController extends GetxController {
   }
 
   List<GroupSection> get groupedMedia {
+    final signature =
+        "${filteredMedia.length}|"
+        "${groupBy.value}|"
+        "${groupAscending.value}|"
+        "${filteredMedia.isEmpty ? '' : filteredMedia.first.id}|"
+        "${filteredMedia.isEmpty ? '' : filteredMedia.last.id}";
+    final cached = _groupedCache;
+    if (cached != null && _groupedSignature == signature) {
+      return cached;
+    }
+    final computed = _computeGroupedMedia();
+    _groupedCache = computed;
+    _groupedSignature = signature;
+    _rowsCache = null;
+    _rowsColumns = -1;
+    return computed;
+  }
+
+  List<GalleryRow> get galleryRows {
+    final int columns = crossAxisCount.value;
+    showFileCount.value;
+    final sections = groupedMedia;
+    final cached = _rowsCache;
+
+    if (cached != null && _rowsColumns == columns) {
+      return cached;
+    }
+
+    final rows = <GalleryRow>[];
+
+    for (final section in sections) {
+      if (section.title.isNotEmpty) {
+        rows.add(GalleryRow.header(section.title, section.media.length));
+      }
+
+      for (int start = 0; start < section.media.length; start += columns) {
+        final end = (start + columns > section.media.length)
+            ? section.media.length
+            : start + columns;
+
+        rows.add(GalleryRow.media(section.media.sublist(start, end)));
+      }
+    }
+
+    _rowsCache = rows;
+    _rowsColumns = columns;
+
+    return rows;
+  }
+
+  List<GroupSection> _computeGroupedMedia() {
     final List<AssetEntity> media = List<AssetEntity>.from(filteredMedia);
 
     if (media.isEmpty) {
       return [];
     }
 
-    // Do not group files
     if (groupBy.value == "Do not group files") {
       return [GroupSection(title: "", media: media)];
     }
@@ -416,10 +1116,24 @@ class PhotosController extends GetxController {
       switch (groupBy.value) {
         case "Last modified (daily)":
           final date = asset.modifiedDateTime;
+          final now = DateTime.now();
 
-          key =
-              "${date.year}-${date.month.toString().padLeft(2, '0')}-"
-              "${date.day.toString().padLeft(2, '0')}";
+          final today = DateTime(now.year, now.month, now.day);
+
+          final yesterday = today.subtract(const Duration(days: 1));
+
+          final assetDate = DateTime(date.year, date.month, date.day);
+
+          if (assetDate == today) {
+            key = "Today";
+          } else if (assetDate == yesterday) {
+            key = "Yesterday";
+          } else {
+            key =
+                "${date.year}-${date.month.toString().padLeft(2, '0')}-"
+                "${date.day.toString().padLeft(2, '0')}";
+          }
+
           break;
 
         case "Last modified (monthly)":
@@ -487,12 +1201,11 @@ class PhotosController extends GetxController {
         groupBy.value == "Date taken (daily)" ||
         groupBy.value == "Date taken (monthly)") {
       entries.sort((a, b) {
-        final result = a.key.compareTo(b.key);
+        final result = _groupSortDate(a.key).compareTo(_groupSortDate(b.key));
 
         return groupAscending.value ? result : -result;
       });
     } else {
-      // File type / Extension / Folder
       entries.sort((a, b) {
         final result = a.key.toLowerCase().compareTo(b.key.toLowerCase());
 
@@ -503,7 +1216,6 @@ class PhotosController extends GetxController {
     return entries.map((entry) {
       String title = entry.key;
 
-      // Date title formatting
       if (groupBy.value == "Last modified (daily)" ||
           groupBy.value == "Date taken (daily)") {
         final parts = entry.key.split("-");
@@ -549,11 +1261,34 @@ class PhotosController extends GetxController {
     }).toList();
   }
 
+  DateTime _groupSortDate(String key) {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    if (key == "Today") return today;
+    if (key == "Yesterday") {
+      return today.subtract(const Duration(days: 1));
+    }
+    final List<String> parts = key.split("-");
+    if (parts.length >= 3) {
+      return DateTime(
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+        int.parse(parts[2]),
+      );
+    }
+    if (parts.length == 2) {
+      return DateTime(int.parse(parts[0]), int.parse(parts[1]));
+    }
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  final Set<String> hiddenAssetIds = <String>{};
+
   void removeAsset(AssetEntity asset) {
+    hiddenAssetIds.add(asset.id);
+    thumbnailCache.remove(asset.id);
     allMedia.removeWhere((element) => element.id == asset.id);
-
     filteredMedia.removeWhere((element) => element.id == asset.id);
-
     allMedia.refresh();
     filteredMedia.refresh();
   }
@@ -566,59 +1301,292 @@ class PhotosController extends GetxController {
         asset.id,
         newValue,
       );
-
       if (result) {
         final updatedAsset = asset.copyWith(isFavorite: newValue);
-
         final allIndex = allMedia.indexWhere(
           (element) => element.id == asset.id,
         );
-
         if (allIndex != -1) {
           allMedia[allIndex] = updatedAsset;
         }
-
         final filteredIndex = filteredMedia.indexWhere(
           (element) => element.id == asset.id,
         );
-
         if (filteredIndex != -1) {
           filteredMedia[filteredIndex] = updatedAsset;
         }
-
         allMedia.refresh();
         filteredMedia.refresh();
-
         return true;
       }
-
       return false;
     } catch (e) {
-      print("Favorite Error: $e");
-
+      log("Favorite Error: $e");
       return false;
+    }
+  }
+
+  static Future<void> deleteEmptyParentFolder(Directory directory) async {
+    final enabled = GetStorageData.readBoolean(
+      GetStorageData.deleteEmptyFolders,
+      defaultValue: true,
+    );
+    if (!enabled) {
+      return;
+    }
+    try {
+      if (!await directory.exists()) {
+        return;
+      }
+      final entities = await directory.list(followLinks: false).toList();
+      if (entities.isEmpty) {
+        await directory.delete();
+      }
+    } catch (e) {
+      debugPrint("Delete Empty Folder Error: $e");
     }
   }
 
   Future<bool> deleteAsset(AssetEntity asset) async {
     try {
-      final deletedIds = await PhotoManager.editor.deleteWithIds([asset.id]);
+      String? parentFolderPath;
+
+      final file = await asset.file;
+
+      if (file != null) {
+        parentFolderPath = file.parent.path;
+      }
+
+      final deletedIds = await MediaActionService.deleteIds([asset.id]);
 
       if (deletedIds.contains(asset.id)) {
         removeAsset(asset);
+
+        if (parentFolderPath != null) {
+          await FileOperationService.deleteEmptyParentFolder(
+            Directory(parentFolderPath),
+          );
+        }
+
         return true;
       }
 
       return false;
     } catch (e) {
-      print("Delete Error: $e");
+      debugPrint("Delete Error: $e");
 
       return false;
     }
   }
 
+  Future<void> deleteSelectedPhotos() async {
+    final List<AssetEntity> selectedAssets = allMedia
+        .where((asset) => selectedMediaIds.contains(asset.id))
+        .toList();
+
+    if (selectedAssets.isEmpty) {
+      return;
+    }
+
+    final String? action = await Get.dialog<String>(
+      Dialog(
+        backgroundColor: InnerChrome.dialogBg,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 35),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Are you sure you want to delete the file(s)?",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.fg(Color(0xff222222)),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 22),
+
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Get.back(result: "recycle");
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: InnerChrome.dialogPrimaryBg,
+                    foregroundColor: InnerChrome.dialogPrimaryFg,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text(
+                    "Add to Recycle Bin",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Get.back(result: "permanent");
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: InnerChrome.dialogSecondaryBg,
+                    foregroundColor: InnerChrome.dialogSecondaryFg,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text(
+                    "Delete permanently",
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (action == null) {
+      return;
+    }
+
+    if (!await MediaActionService.ensureMediaManagement()) {
+      return;
+    }
+
+    try {
+      final Set<String> deletedIds = {};
+
+      if (action == "recycle") {
+        final RecycleBinController recycleController =
+            Get.isRegistered<RecycleBinController>()
+            ? Get.find<RecycleBinController>()
+            : Get.put(RecycleBinController());
+
+        for (final asset in selectedAssets) {
+          try {
+            final bool saved = await recycleController.addToRecycleBin(asset);
+
+            if (!saved) {
+              debugPrint("Recycle Bin save failed => ${asset.id}");
+              continue;
+            }
+
+            final List<String> result = await MediaActionService.deleteIds(
+              [asset.id],
+            );
+
+            if (result.contains(asset.id)) {
+              deletedIds.add(asset.id);
+
+              final file = await asset.file;
+
+              if (file != null) {
+                await FileOperationService.deleteEmptyParentFolder(file.parent);
+              }
+            }
+          } catch (e) {
+            debugPrint("Recycle delete error ${asset.id} => $e");
+          }
+        }
+
+        if (deletedIds.isNotEmpty) {
+          allMedia.removeWhere((asset) => deletedIds.contains(asset.id));
+
+          filteredMedia.removeWhere((asset) => deletedIds.contains(asset.id));
+
+          for (final id in deletedIds) {
+            thumbnailCache.remove(id);
+          }
+
+          allMedia.refresh();
+          filteredMedia.refresh();
+        }
+
+        clearPhotoSelection();
+
+        AppToast.show(
+          "${deletedIds.length} item"
+            "${deletedIds.length == 1 ? "" : "s"} moved to Recycle Bin",
+        );
+
+        return;
+      }
+
+if (action == "permanent") {
+        final List<String> ids = selectedAssets
+            .map((asset) => asset.id)
+            .toList();
+
+        final List<String> result = await MediaActionService.deleteIds(
+          ids,
+        );
+
+        deletedIds.addAll(result);
+
+        if (deletedIds.isNotEmpty) {
+          for (final asset in selectedAssets) {
+            if (!deletedIds.contains(asset.id)) {
+              continue;
+            }
+
+            final file = await asset.file;
+
+            if (file != null) {
+              await FileOperationService.deleteEmptyParentFolder(file.parent);
+            }
+          }
+
+          allMedia.removeWhere((asset) => deletedIds.contains(asset.id));
+
+          filteredMedia.removeWhere((asset) => deletedIds.contains(asset.id));
+
+          for (final id in deletedIds) {
+            thumbnailCache.remove(id);
+          }
+
+          allMedia.refresh();
+          filteredMedia.refresh();
+        }
+
+        clearPhotoSelection();
+
+        AppToast.show(
+          "${deletedIds.length} item"
+            "${deletedIds.length == 1 ? "" : "s"} deleted permanently",
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint("Delete Selected Photos Error => $e");
+      debugPrintStack(stackTrace: stackTrace);
+
+      AppToast.show("Unable to delete selected files");
+    }
+  }
+
   Future<void> applyMediaFilter() async {
     final result = allMedia.where((asset) {
+      if (hiddenAssetIds.contains(asset.id)) {
+        return false;
+      }
       final title = (asset.title ?? '').toLowerCase();
       final mime = (asset.mimeType ?? '').toLowerCase();
 
@@ -651,7 +1619,6 @@ class PhotosController extends GetxController {
 
     List<AssetEntity> filtered = result;
 
-    // Date filter
     if (selectedDate.value != null) {
       final date = selectedDate.value!;
 
@@ -664,7 +1631,6 @@ class PhotosController extends GetxController {
       }).toList();
     }
 
-    // Current selected sorting bhi maintain rahegi
     await _sortList(filtered);
 
     filteredMedia.assignAll(filtered);
@@ -715,7 +1681,10 @@ class PhotosController extends GetxController {
 
       case "Last modified":
         list.sort((a, b) {
-          final result = a.modifiedDateTime.compareTo(b.modifiedDateTime);
+          // int seconds: same order as modifiedDateTime, no DateTime objects
+          final result = (a.modifiedDateSecond ?? 0).compareTo(
+            b.modifiedDateSecond ?? 0,
+          );
 
           return sortAscending.value ? result : -result;
         });
@@ -723,7 +1692,10 @@ class PhotosController extends GetxController {
 
       case "Date taken":
         list.sort((a, b) {
-          final result = a.createDateTime.compareTo(b.createDateTime);
+          // int seconds: same order as createDateTime, no DateTime objects
+          final result = (a.createDateSecond ?? 0).compareTo(
+            b.createDateSecond ?? 0,
+          );
 
           return sortAscending.value ? result : -result;
         });
@@ -768,7 +1740,7 @@ class PhotosController extends GetxController {
     allMedia.refresh();
     filteredMedia.refresh();
 
-    print("Edited Asset Added: ${asset.id}");
+    log("Edited Asset Added: ${asset.id}");
   }
 
   void replaceAsset(AssetEntity original, AssetEntity edited) {
@@ -798,9 +1770,9 @@ class PhotosController extends GetxController {
     allMedia.refresh();
     filteredMedia.refresh();
 
-    print("Original replaced: ${original.id}");
+    log("Original replaced: ${original.id}");
 
-    print("Edited asset: ${edited.id}");
+    log("Edited asset: ${edited.id}");
   }
 }
 
@@ -809,4 +1781,17 @@ class GroupSection {
   final List<AssetEntity> media;
 
   GroupSection({required this.title, required this.media});
+}
+
+class GalleryRow {
+  final bool isHeader;
+  final String title;
+  final int count;
+  final List<AssetEntity> media;
+
+  const GalleryRow.header(this.title, this.count)
+    : isHeader = true,
+      media = const [];
+
+  const GalleryRow.media(this.media) : isHeader = false, title = '', count = 0;
 }

@@ -8,6 +8,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:wallpaper_manager_flutter/wallpaper_manager_flutter.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class WallpaperController extends GetxController {
   final File imageFile;
@@ -16,21 +17,11 @@ class WallpaperController extends GetxController {
     required this.imageFile,
   });
 
-  // =========================================================
-  // IMAGE
-  // =========================================================
-
-  final Rxn<ui.Image> image = Rxn<ui.Image>();
+final Rxn<ui.Image> image = Rxn<ui.Image>();
   final RxBool isLoadingImage = true.obs;
 
-  // =========================================================
-  // ASPECT RATIO
-  // =========================================================
+final RxInt ratioIndex = 0.obs;
 
-  final RxInt ratioIndex = 0.obs;
-
-  // 0 = full image
-  // 1 = square
   final RxDouble aspectRatio = 1.0.obs;
 
   final RxBool allowAspectRatio = false.obs;
@@ -44,45 +35,25 @@ class WallpaperController extends GetxController {
     16 / 9,
   ];
 
-  // =========================================================
-  // ROTATION
-  // =========================================================
+final RxInt rotation = 0.obs;
 
-  final RxInt rotation = 0.obs;
-
-  // =========================================================
-  // CROP
-  // =========================================================
-
-  final RxDouble cropX = 0.0.obs;
+final RxDouble cropX = 0.0.obs;
   final RxDouble cropY = 0.0.obs;
   final RxDouble cropSize = 0.0.obs;
 
   bool cropInitialized = false;
 
-  // =========================================================
-  // WALLPAPER LOCATION
-  // =========================================================
-
-  final RxInt selectedLocation =
+final RxInt selectedLocation =
       WallpaperManagerFlutter.homeScreen.obs;
 
-  // =========================================================
-  // INIT
-  // =========================================================
-
-  @override
+@override
   void onInit() {
     super.onInit();
 
     loadImage();
   }
 
-  // =========================================================
-  // LOAD IMAGE
-  // =========================================================
-
-  Future<void> loadImage() async {
+Future<void> loadImage() async {
     try {
       isLoadingImage.value = true;
 
@@ -108,11 +79,7 @@ class WallpaperController extends GetxController {
     }
   }
 
-  // =========================================================
-  // INITIALIZE CROP
-  // =========================================================
-
-  void initializeCrop(
+void initializeCrop(
       double displayWidth,
       double displayHeight,
       ) {
@@ -138,11 +105,7 @@ class WallpaperController extends GetxController {
     cropInitialized = true;
   }
 
-  // =========================================================
-  // MOVE CROP
-  // =========================================================
-
-  void moveCrop(
+void moveCrop(
       double dx,
       double dy,
       double displayWidth,
@@ -182,11 +145,7 @@ class WallpaperController extends GetxController {
     cropY.value = newY;
   }
 
-  // =========================================================
-  // RESIZE CROP
-  // =========================================================
-
-  void resizeCrop(
+void resizeCrop(
       String corner,
       double dx,
       double dy,
@@ -199,11 +158,7 @@ class WallpaperController extends GetxController {
 
     const double minSize = 80.0;
 
-    // =======================================================
-    // TOP LEFT
-    // =======================================================
-
-    if (corner == "topLeft") {
+if (corner == "topLeft") {
       final delta =
       math.min(dx, dy);
 
@@ -219,11 +174,7 @@ class WallpaperController extends GetxController {
       }
     }
 
-    // =======================================================
-    // TOP RIGHT
-    // =======================================================
-
-    else if (corner == "topRight") {
+else if (corner == "topRight") {
       final delta =
       math.max(dx, -dy);
 
@@ -238,11 +189,7 @@ class WallpaperController extends GetxController {
       }
     }
 
-    // =======================================================
-    // BOTTOM LEFT
-    // =======================================================
-
-    else if (corner == "bottomLeft") {
+else if (corner == "bottomLeft") {
       final delta =
       math.max(-dx, dy);
 
@@ -257,11 +204,7 @@ class WallpaperController extends GetxController {
       }
     }
 
-    // =======================================================
-    // BOTTOM RIGHT
-    // =======================================================
-
-    else if (corner == "bottomRight") {
+else if (corner == "bottomRight") {
       final delta =
       math.max(dx, dy);
 
@@ -280,14 +223,9 @@ class WallpaperController extends GetxController {
     cropSize.value = size;
   }
 
-  // =========================================================
-  // ALLOW ASPECT RATIO
-  // =========================================================
-
-  void allowChangingAspectRatio() {
+void allowChangingAspectRatio() {
     allowAspectRatio.value = true;
 
-    // More se enable karte hi full image.
     aspectRatio.value = 0;
 
     ratioIndex.value = 0;
@@ -308,21 +246,15 @@ class WallpaperController extends GetxController {
       return;
     }
 
-    // Abhi crop editor square base par hai.
-    // Ratio change hone par size ko same area ke andar rakho.
-
-    final oldSize = cropSize.value;
+final oldSize = cropSize.value;
 
     if (aspectRatio.value == 0) {
       return;
     }
 
-    // Current crop ka center preserve karo.
     final centerX = cropX.value + oldSize / 2;
     final centerY = cropY.value + oldSize / 2;
 
-    // Ratio ke according height/width
-    // UI me next rebuild par calculate hoga.
     cropX.value =
         math.max(0, centerX - oldSize / 2);
 
@@ -337,8 +269,7 @@ class WallpaperController extends GetxController {
     }
   }
 
-
-  void selectWallpaperLocation(
+void selectWallpaperLocation(
       int location,
       ) {
     selectedLocation.value =
@@ -361,11 +292,7 @@ class WallpaperController extends GetxController {
       ui.Image rotatedImage =
           frame.image;
 
-      // -------------------------------------------------------
-      // ROTATE
-      // -------------------------------------------------------
-
-      rotatedImage =
+rotatedImage =
       await rotateUiImage(
         rotatedImage,
         rotation.value,
@@ -377,11 +304,7 @@ class WallpaperController extends GetxController {
       final imageHeight =
       rotatedImage.height.toDouble();
 
-      // =======================================================
-      // FULL IMAGE
-      // =======================================================
-
-      if (aspectRatio.value == 0) {
+if (aspectRatio.value == 0) {
         return saveImageAsWallpaperFile(
           rotatedImage,
           0,
@@ -391,26 +314,14 @@ class WallpaperController extends GetxController {
         );
       }
 
-      // =======================================================
-      // CURRENT CROP
-      // =======================================================
-
-      final currentImage =
+final currentImage =
           image.value;
 
       if (currentImage == null) {
         return null;
       }
 
-      // =======================================================
-      // DISPLAY SIZE
-      // =======================================================
-
-      // UI me image BoxFit.contain ke saath display hoti hai.
-      // Crop coordinates ko original image coordinates me convert
-      // karne ke liye displayed image dimensions calculate karte hain.
-
-      final screenWidth =
+final screenWidth =
           Get.width;
 
       final screenHeight =
@@ -447,11 +358,7 @@ class WallpaperController extends GetxController {
                 originalRatio;
       }
 
-      // =======================================================
-      // SCALE
-      // =======================================================
-
-      final scaleX =
+final scaleX =
           imageWidth /
               displayWidth;
 
@@ -459,11 +366,7 @@ class WallpaperController extends GetxController {
           imageHeight /
               displayHeight;
 
-      // =======================================================
-      // CROP RECT
-      // =======================================================
-
-      double left =
+double left =
           cropX.value * scaleX;
 
       double top =
@@ -475,11 +378,7 @@ class WallpaperController extends GetxController {
       double cropHeight =
           cropSize.value * scaleY;
 
-      // =======================================================
-      // SAFETY
-      // =======================================================
-
-      left =
+left =
           left.clamp(
             0.0,
             math.max(
@@ -529,11 +428,7 @@ class WallpaperController extends GetxController {
     }
   }
 
-  // =========================================================
-  // SAVE CROPPED IMAGE
-  // =========================================================
-
-  Future<File?> saveImageAsWallpaperFile(
+Future<File?> saveImageAsWallpaperFile(
       ui.Image image,
       double left,
       double top,
@@ -606,11 +501,7 @@ class WallpaperController extends GetxController {
     return file;
   }
 
-  // =========================================================
-  // ROTATE UI IMAGE
-  // =========================================================
-
-  Future<ui.Image> rotateUiImage(
+Future<ui.Image> rotateUiImage(
       ui.Image image,
       int degrees,
       ) {
@@ -669,18 +560,9 @@ class WallpaperController extends GetxController {
     );
   }
 
-  // =========================================================
-  // APPLY WALLPAPER
-  // =========================================================
-
-  Future<void> applyWallpaper() async {
+Future<void> applyWallpaper() async {
     if (!Platform.isAndroid) {
-      Get.snackbar(
-        "Wallpaper",
-        "Direct wallpaper setting is available on Android only.",
-        snackPosition:
-        SnackPosition.BOTTOM,
-      );
+      AppToast.show("Direct wallpaper setting is available on Android only.");
 
       return;
     }
@@ -707,12 +589,7 @@ class WallpaperController extends GetxController {
 
       if (wallpaperFile == null ||
           !await wallpaperFile.exists()) {
-        Get.snackbar(
-          "Wallpaper",
-          "Unable to prepare wallpaper image",
-          snackPosition:
-          SnackPosition.BOTTOM,
-        );
+        AppToast.show("Unable to prepare wallpaper image");
 
         return;
       }
@@ -742,12 +619,7 @@ class WallpaperController extends GetxController {
 
         Get.back();
       } else {
-        Get.snackbar(
-          "Wallpaper",
-          "Wallpaper could not be set",
-          snackPosition:
-          SnackPosition.BOTTOM,
-        );
+        AppToast.show("Wallpaper could not be set");
       }
     } catch (e, stackTrace) {
       if (Get.isDialogOpen == true) {
@@ -762,12 +634,7 @@ class WallpaperController extends GetxController {
         stackTrace: stackTrace,
       );
 
-      Get.snackbar(
-        "Wallpaper",
-        "Unable to set wallpaper",
-        snackPosition:
-        SnackPosition.BOTTOM,
-      );
+      AppToast.show("Unable to set wallpaper");
     } finally {
       try {
         if (wallpaperFile != null &&

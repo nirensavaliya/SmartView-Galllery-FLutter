@@ -1,22 +1,33 @@
 import 'dart:convert';
 
 import 'package:get_storage/get_storage.dart';
-class GetStorageData{
 
+class GetStorageData {
   static String photosGridColumns = "photosGridColumns";
+  static String albumsGridColumns = "albumsGridColumns";
   static String recycleBin = "RecycleBin";
   static String customAlbums = "CustomAlbums";
   static String memoryNames = "MemoryNames";
   static String deletedMemories = "DeletedMemories";
   static String memoryCovers = "MemoryCovers";
-
-  /// <<< To save object data --------- >>>
+  static String customMemories = "CustomMemories";
+  static const String darkMode = "darkMode";
+  static const String deleteEmptyFolders = "deleteEmptyFolders";
+  static const String keepLastModified = "keepLastModified";
+  static const String privateSecurityQuestion = "privateSecurityQuestion";
+  static const String privateSecurityAnswer = "privateSecurityAnswer";
+  static const String privateResetEnabled = "privateResetEnabled";
+  static const String securityQuestionKey = 'private_security_question';
+  static const String decoyPinKey = 'private_decoy_pin';
+  static const String securityAnswerKey = 'private_security_answer';
+  static const String privateLockModeKey = 'private_lock_mode';
+  static const String privateLockPinKey = 'private_lock_pin';
+  static const String privateLockPatternKey = 'private_lock_pattern';
   static saveString(String key, value) async {
     final box = GetStorage();
     return box.write(key, value);
   }
 
-  /// <<< To read object data --------- >>>
   static readString(String key) {
     final box = GetStorage();
     if (box.hasData(key)) {
@@ -26,25 +37,22 @@ class GetStorageData{
     }
   }
 
-  /// <<< To save boolean data --------- >>>
   static Future<void> saveBoolean(String key, bool value) async {
     final box = GetStorage();
     return box.write(key, value);
   }
 
-  /// <<< To read boolean data --------- >>>
-  static bool readBoolean(String key) {
+  static bool readBoolean(String key, {bool defaultValue = false}) {
     final box = GetStorage();
-    return box.read<bool>(key) ?? false;
+
+    return box.read<bool>(key) ?? defaultValue;
   }
 
-  /// <<< To remove data --------- >>>
   static removeData(String key) async {
     final box = GetStorage();
     return box.remove(key);
   }
 
-  /// <<< To Store Key data --------- >>>
   static bool containKey(String key) {
     final box = GetStorage();
     return box.hasData(key);
@@ -66,5 +74,4 @@ class GetStorageData{
 
     return jsonDecode(result);
   }
-
 }

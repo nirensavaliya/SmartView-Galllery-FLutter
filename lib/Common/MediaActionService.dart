@@ -2,16 +2,58 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:share_plus/share_plus.dart';
 
 class MediaActionService {
+  static const MethodChannel _channel = MethodChannel('native_camera');
 
+  static bool waitingForPermission = false;
 
-  static Future<void> share(
-      AssetEntity asset,
-      ) async {
+  static bool? _canManageMedia;
+
+  static Future<bool> ensureMediaManagement() async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+    if (_canManageMedia == true) {
+      waitingForPermission = false;
+      return true;
+    }
+
+    try {
+      final bool? granted = await _channel.invokeMethod<bool>(
+        'requestMediaManagement',
+      );
+      if (granted == true) {
+        _canManageMedia = true;
+        waitingForPermission = false;
+        return true;
+      }
+
+      waitingForPermission = true;
+      AppToast.show('Allow media management, then delete again');
+      return false;
+    } catch (_) {
+      waitingForPermission = false;
+      return true;
+    }
+  }
+
+  static Future<List<String>> deleteIds(List<String> ids) async {
+    if (ids.isEmpty) {
+      return <String>[];
+    }
+    if (!await ensureMediaManagement()) {
+      return <String>[];
+    }
+    return PhotoManager.editor.deleteWithIds(ids);
+  }
+
+  static Future<void> share(AssetEntity asset,) async {
     final file = await asset.file;
 
     if (file == null || !file.existsSync()) {
@@ -27,14 +69,8 @@ class MediaActionService {
     );
   }
 
-  // =========================================================
-  // DELETE
-  // =========================================================
-
-  static Future<void> delete(
-      AssetEntity asset,
-      ) async {
-    await PhotoManager.editor.deleteWithIds([
+  static Future<void> delete(AssetEntity asset,) async {
+    await deleteIds([
       asset.id,
     ]);
   }
@@ -71,9 +107,6 @@ class MediaActionService {
     return true;
   }
 
-  // =========================================================
-  // MOVE
-  // =========================================================
 
   static Future<bool> moveTo(
       AssetEntity asset,
@@ -105,10 +138,6 @@ class MediaActionService {
 
     return true;
   }
-
-  // =========================================================
-  // RENAME
-  // =========================================================
 
   static Future<void> rename(
       AssetEntity asset,
@@ -149,10 +178,6 @@ class MediaActionService {
     await source.rename(destination.path);
   }
 
-  // =========================================================
-  // HIDE
-  // =========================================================
-
   static Future<void> hide(
       AssetEntity asset,
       ) async {
@@ -174,19 +199,14 @@ class MediaActionService {
           "${Platform.pathSeparator}"
           "${DateTime.now().millisecondsSinceEpoch}_$fileName",
     );
-
-    // Pehle private storage me copy.
     await source.copy(destination.path);
-
-    // Copy successful hone ke baad Gallery se remove.
-    await PhotoManager.editor.deleteWithIds([
+    final List<String> removed = await deleteIds([
       asset.id,
     ]);
+    if (!removed.contains(asset.id) && await destination.exists()) {
+      await destination.delete();
+    }
   }
-
-  // =========================================================
-  // GET HIDDEN FILES
-  // =========================================================
 
   static Future<List<File>> getHiddenFiles() async {
     final directory =
@@ -210,9 +230,6 @@ class MediaActionService {
     return files;
   }
 
-  // =========================================================
-  // UNHIDE
-  // =========================================================
 
   static Future<AssetEntity> unhide(
       File hiddenFile,
@@ -264,10 +281,6 @@ class MediaActionService {
     return asset;
   }
 
-  // =========================================================
-  // SAVE EDITED IMAGE
-  // =========================================================
-
   static Future<AssetEntity> saveEditedImage(
       Uint8List bytes, {
         required String name,
@@ -291,9 +304,6 @@ class MediaActionService {
     );
   }
 
-  // =========================================================
-  // PRIVATE DIRECTORY
-  // =========================================================
 
   static Future<Directory> _hiddenDirectory() async {
     final appDirectory =
@@ -314,9 +324,6 @@ class MediaActionService {
     return directory;
   }
 
-  // =========================================================
-  // HELPERS
-  // =========================================================
 
   static String _extension(String path) {
     final index = path.lastIndexOf('.');

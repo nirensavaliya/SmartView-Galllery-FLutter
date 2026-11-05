@@ -1,10 +1,15 @@
-
+import 'package:flutter/animation.dart';
 import 'package:gallery_photos/View/Screen/Albums/AlbumsScreen.dart';
 import 'package:gallery_photos/View/Screen/Albums/Controller/AlbumsController.dart';
 import 'package:gallery_photos/View/Screen/BottomBar/Controller/DashboardController.dart';
 import 'package:gallery_photos/View/Screen/BottomBar/DashBoard.dart';
+import 'package:gallery_photos/View/Screen/CleanerScreen/CleanerCategoryScreen.dart';
 import 'package:gallery_photos/View/Screen/CleanerScreen/CleanerScreen.dart';
-import 'package:gallery_photos/View/Screen/Photos/Controller/PhotoViewController.dart';
+import 'package:gallery_photos/View/Screen/CleanerScreen/Controller/CleanerController.dart';
+import 'package:gallery_photos/View/Screen/Lock/Controller/PrivatePhotoController.dart';
+import 'package:gallery_photos/View/Screen/Lock/Controller/lock_setup_controller.dart';
+import 'package:gallery_photos/View/Screen/Lock/Lockscreen.dart';
+import 'package:gallery_photos/View/Screen/Lock/PrivateScreen.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
 import 'package:gallery_photos/View/Screen/Photos/PhotoViewScreen.dart';
 import 'package:gallery_photos/View/Screen/Photos/PhotosScreen.dart';
@@ -42,7 +47,6 @@ class AppPages {
       page: () => PhotoViewScreen(
         asset: Get.arguments as AssetEntity,
       ),
-
     ),
     GetPage(
       name: AppRoutes.recycleBinView,
@@ -53,7 +57,34 @@ class AppPages {
     ),
     GetPage(
       name: AppRoutes.cleanerScreen,
-      page: () => CleanerScreen(),
+      page: () => const CleanerScreen(),
+      binding: BindingsBuilder(() {
+        Get.lazyPut<CleanerController>(
+          () => CleanerController(),
+          fenix: true,
+        );
+      }),
+    ),
+    GetPage(
+      name: AppRoutes.cleanerCategoryScreen,
+      page: () => const CleanerCategoryScreen(),
+    ),
+    GetPage(
+      name: AppRoutes.LockScreen,
+      page: () => LockSetupScreen(),
+      transition: Transition.cupertino,
+      transitionDuration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      binding: BindingsBuilder(() {
+        Get.lazyPut<LockSetupController>(() => LockSetupController());
+      }),
+    ),
+    GetPage(
+      name: AppRoutes.privateScreen,
+      page: () => PrivateScreen(),
+      binding: BindingsBuilder(() {
+        Get.lazyPut<PrivateLockController>(() => PrivateLockController());
+      }),
     ),
   ];
 }

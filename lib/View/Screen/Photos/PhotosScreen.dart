@@ -2,15 +2,16 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
+import 'package:gallery_photos/View/Screen/Splash/widgets/SplashLoader.dart';
 import 'package:gallery_photos/View/Constant/App_font.dart';
 import 'package:gallery_photos/View/Screen/Photos/PhotoViewScreen.dart';
 import 'package:gallery_photos/View/Screen/RecycleBin/RecycleBinView.dart';
-import 'package:gallery_photos/View/Utils/App_Routes.dart';
-import 'package:gallery_photos/View/Widget/Common_Text.dart';
+import 'package:gallery_photos/View/Setting/SettingScreen.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
-
 import 'Controller/PhotosController.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class PhotosScreen extends StatefulWidget {
   const PhotosScreen({super.key});
@@ -24,45 +25,243 @@ class _PhotosScreenState extends State<PhotosScreen> {
   final ScrollController _scrollController = ScrollController();
 
   Timer? _scrollButtonTimer;
+  final RxBool _showScrollButton = false.obs;
+  final RxBool _showFloatingDate = false.obs;
+  final RxString _floatingDate = ''.obs;
+  final Map<String, GlobalKey> _dateHeaderKeys = {};
+  final RxDouble _scrollThumbTop = 250.0.obs;
+  bool _isScrolling = false;
+  Timer? _scrollingTimer;
+  Offset? _dragPosition;
+  Offset? _lastPointerPosition;
+  bool _longPressSelectionActive = false;
+  Timer? _dragAutoScrollTimer;
+  bool _dragSelecting = false;
 
-  bool _showScrollButton = true;
+  String? _dragStartAssetId;
+  bool _pinchZooming = false;
+  final Map<int, Offset> _pinchPoints = <int, Offset>{};
+  double? _pinchStartSpan;
 
+  void _trackPinchDown(int pointer, Offset position) {
+    _pinchPoints[pointer] = position;
+    if (_pinchPoints.length == 2 && !_pinchZooming) {
+      _pinchStartSpan = _pinchSpan();
+      controller.onGridScaleStart();
+      setState(() {
+        _pinchZooming = true;
+      });
+    }
+  }
+
+  void _trackPinchMove(int pointer, Offset position) {
+    if (!_pinchPoints.containsKey(pointer)) {
+      return;
+    }
+    _pinchPoints[pointer] = position;
+    final double? span = _pinchSpan();
+    if (!_pinchZooming ||
+        span == null ||
+        _pinchStartSpan == null ||
+        _pinchStartSpan! <= 1) {
+      return;
+    }
+    controller.onGridScaleUpdate(span / _pinchStartSpan!);
+  }
+
+  void _trackPinchEnd(int pointer) {
+    _pinchPoints.remove(pointer);
+    if (_pinchPoints.length < 2 && _pinchZooming) {
+      _pinchStartSpan = null;
+      setState(() {
+        _pinchZooming = false;
+      });
+    }
+  }
+
+  double? _pinchSpan() {
+    if (_pinchPoints.length < 2) {
+      return null;
+    }
+    final List<Offset> points = _pinchPoints.values.toList();
+    return (points[0] - points[1]).distance;
+  }
   @override
   void dispose() {
     _scrollButtonTimer?.cancel();
+    _dragAutoScrollTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
-  void _showScrollButtonTemporarily() {
-    if (!mounted) return;
 
-    setState(() {
-      _showScrollButton = true;
-    });
-
-    _scrollButtonTimer?.cancel();
-
-    _scrollButtonTimer = Timer(
-      const Duration(seconds: 2),
-          () {
-        if (!mounted) return;
-
-        setState(() {
-          _showScrollButton = false;
-        });
-      },
-    );
-  }
-  void _scrollUp() {
-    _showScrollButtonTemporarily();
-
+  void _updateFloatingDate() {
     if (!_scrollController.hasClients) return;
 
-    final double current =
-        _scrollController.offset;
+    final double topLimit =
+        MediaQuery.of(context).padding.top + kToolbarHeight + 8;
 
-    final double target =
-    (current - 300).clamp(
+    String? currentDate;
+
+    for (final row in controller.galleryRows) {
+      if (!row.isHeader) continue;
+      final key = _dateHeaderKeys[row.title];
+      if (key == null) continue;
+
+      final keyContext = key.currentContext;
+      if (keyContext == null) continue;
+      final renderObject = keyContext.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) {
+        continue;
+      }
+      final position = renderObject.localToGlobal(Offset.zero);
+      if (position.dy <= topLimit) {
+        currentDate = row.title;
+      }
+    }
+
+    if (currentDate != null &&
+        currentDate.isNotEmpty &&
+        _floatingDate.value != currentDate) {
+      _floatingDate.value = currentDate;
+    }
+  }
+
+  void _startDragSelectionAfterLongPress(AssetEntity asset) {
+    final position = _lastPointerPosition;
+    if (position == null) {
+      return;
+    }
+
+    _dragPosition = position;
+    _dragStartAssetId = asset.id;
+    _longPressSelectionActive = true;
+    _dragSelecting = true;
+    controller.startPhotoSelection(asset);
+    controller.startDragSelection(asset, position);
+    controller.isDragSelecting.value = true;
+    _startDragAutoScroll();
+  }
+
+  void _updateDragSelection(Offset position) {
+    _lastPointerPosition = position;
+
+    if (!_longPressSelectionActive) {
+      return;
+    }
+
+    _dragPosition = position;
+
+    controller.updateDragSelection(position);
+
+    if (controller.isDragSelecting.value) {
+      _dragSelecting = true;
+      _startDragAutoScroll();
+    }
+  }
+
+  void _endDragSelection() {
+    _dragAutoScrollTimer?.cancel();
+    _dragAutoScrollTimer = null;
+    _dragPosition = null;
+    _lastPointerPosition = null;
+    _dragStartAssetId = null;
+    _dragSelecting = false;
+    _longPressSelectionActive = false;
+    controller.endDragSelection();
+  }
+
+  void _startDragAutoScroll() {
+    if (_dragAutoScrollTimer != null) {
+      return;
+    }
+
+    _dragAutoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (
+      _,
+    ) {
+      if (!_longPressSelectionActive ||
+          !_dragSelecting ||
+          _dragPosition == null ||
+          !controller.isDragSelecting.value) {
+        return;
+      }
+
+      if (!_scrollController.hasClients) {
+        return;
+      }
+
+      final screenHeight = MediaQuery.of(context).size.height;
+      final y = _dragPosition!.dy;
+
+      const double edgeSize = 100;
+      const double maxSpeed = 18;
+      double scrollAmount = 0;
+
+      if (y < edgeSize) {
+        final intensity = ((edgeSize - y) / edgeSize).clamp(0.0, 1.0);
+
+        scrollAmount = -maxSpeed * intensity;
+      } else if (y > screenHeight - edgeSize) {
+        final intensity = ((y - (screenHeight - edgeSize)) / edgeSize).clamp(
+          0.0,
+          1.0,
+        );
+        scrollAmount = maxSpeed * intensity;
+      }
+
+      if (scrollAmount == 0) {
+        return;
+      }
+
+      final current = _scrollController.offset;
+      final target = (current + scrollAmount).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
+      if (target == current) {
+        return;
+      }
+
+      _scrollController.jumpTo(target);
+      controller.updateDragSelection(_dragPosition!);
+    });
+  }
+
+  void _showScrollControls() {
+    if (!mounted) return;
+
+    _showScrollButton.value = true;
+    _showFloatingDate.value = true;
+    _scrollButtonTimer?.cancel();
+    _scrollButtonTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+
+      _showScrollButton.value = false;
+      _showFloatingDate.value = false;
+    });
+  }
+
+  void _updateScrollThumbPosition() {
+    if (!_scrollController.hasClients) return;
+
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.offset;
+    const double minTop = 70;
+    final double maxTop = MediaQuery.of(context).size.height - 180;
+
+    if (maxScroll <= 0) {
+      _scrollThumbTop.value = minTop;
+      return;
+    }
+
+    final progress = (currentScroll / maxScroll).clamp(0.0, 1.0);
+    _scrollThumbTop.value = minTop + ((maxTop - minTop) * progress);
+  }
+
+  void _scrollUp() {
+    _showScrollControls();
+    if (!_scrollController.hasClients) return;
+    final double current = _scrollController.offset;
+    final double target = (current - 300).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
     );
@@ -75,149 +274,254 @@ class _PhotosScreenState extends State<PhotosScreen> {
   }
 
   void _scrollDown() {
-    _showScrollButtonTemporarily();
+    _showScrollControls();
 
     if (!_scrollController.hasClients) return;
 
-    final double current =
-        _scrollController.offset;
-
-    final double target =
-    (current + 300).clamp(
+    final double current = _scrollController.offset;
+    final double target = (current + 300).clamp(
       0.0,
       _scrollController.position.maxScrollExtent,
     );
-
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeOut,
     );
   }
+
   @override
   Widget build(BuildContext context) {
+    final bool light = Theme.of(context).brightness == Brightness.light;
+    final Color page = light ? const Color(0xFFF6F7F9) : const Color(0xFF0A0E14);
+    final Color ink = light ? const Color(0xFF111827) : Colors.white;
+    final Color muted = light ? const Color(0xFF8A94A8) : Colors.white54;
     return Scaffold(
-      backgroundColor: const Color(0xffF1F3F5),
-      appBar: AppBar(
-        backgroundColor: const Color(0xffF1F3F5),
-        elevation: 0,
-        title: Text(
-          "Photos",
-          style: TextStyle(fontSize: 20, fontFamily: FontFamily.robotoBold),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () {
-              controller.openCamera();
-            },
-            icon: const Icon(Icons.camera_alt_outlined),
-          ),
+      backgroundColor: page,
 
-          PopupMenuButton<String>(
-            padding: EdgeInsets.zero,
-            color: Colors.white,
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(72),
+        child: Obx(() {
+          if (controller.isSelectionMode.value) {
+            return AppBar(
+              backgroundColor: page,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              toolbarHeight: 72,
 
-            icon: const Icon(Icons.more_vert, size: 24),
+              leading: IconButton(
+                onPressed: controller.clearPhotoSelection,
+                icon: Icon(
+                  Icons.close,
+                  size: 25,
+                  color: ink,
+                ),
+              ),
 
-            onSelected: (value) {
-              if (value == "filter") {
-                showFilterDialog();
-              } else if (value == "sort") {
-                showSortDialog();
-              } else if (value == "group") {
-                showGroupByDialog();
-              } else if (value == "columns") {
-                showColumnsDialog();
-              } else if (value == "recycle") {
-                Get.to(() => RecycleBinScreen());
-                controller.refreshMedia();
-              } else if (value == "setting") {
-                // Settings
+              title: Text(
+                "${controller.selectedMediaIds.length} selected",
+                style: TextStyle(
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: ink,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: controller.selectAllPhotos,
+                  child: Text(
+                    "Select all",
+                    style: TextStyle(
+                      fontFamily: 'Plus Jakarta Sans',
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: ink,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+          return AppBar(
+            backgroundColor: page,
+            surfaceTintColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+            elevation: 0,
+            toolbarHeight: 72,
+            titleSpacing: 20,
+
+            title: Obx(() {
+              if (!controller.isSearching.value) {
+                return  Text(
+                  "Photos",
+                  style: TextStyle(
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: ink,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                  ),
+                );
               }
-            },
 
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: "filter",
-                child: Text(
-                  "Filter Media",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
+              return TextField(
+                autofocus: true,
+                style: TextStyle(color: ink, fontSize: 16),
+                onChanged: (value) {
+                  controller.searchPhotos(value);
+                },
+                onSubmitted: (value) {
+                  controller.searchPhotos(value);
+                },
+                decoration: InputDecoration(
+                  hintText: "Search photos...",
+                  hintStyle: TextStyle(color: muted),
+                  border: InputBorder.none,
+
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      color: ink,
+                    ),
+                    onPressed: () {
+                      controller.isSearching.value = false;
+                      controller.searchQuery.value = '';
+
+                      controller.searchPhotos('');
+                    },
                   ),
                 ),
-              ),
+              );
+            }),
 
-              PopupMenuItem<String>(
-                value: "sort",
-                child: Text(
-                  "Sort By",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
-                  ),
-                ),
+            actions: [
+              _CircleIconButton(
+                icon: Icons.search_rounded,
+                onTap: () {
+                  controller.isSearching.value = true;
+                },
               ),
+              const SizedBox(width: 10),
+              _CircleIconButton(
+                icon: Icons.photo_camera_outlined,
+                filled: true,
+                onTap: controller.openCamera,
+              ),
+              const SizedBox(width: 10),
+              PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
+                color: Theme.of(context).cardColor,
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const _CircleIconButton(
+                  icon: Icons.more_vert_rounded,
+                ),
 
-              PopupMenuItem<String>(
-                value: "group",
-                child: Text(
-                  "Group By",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
-                  ),
-                ),
-              ),
+                onSelected: (value) {
+                  if (value == "filter") {
+                    showFilterDialog();
+                  } else if (value == "sort") {
+                    showSortDialog();
+                  } else if (value == "group") {
+                    showGroupByDialog();
+                  } else if (value == "columns") {
+                    showColumnsDialog();
+                  } else if (value == "recycle") {
+                    Get.to(() => RecycleBinScreen());
+                    controller.refreshMedia();
+                  } else if (value == "setting") {
+                    Get.to(() => SettingsScreen());
+                  }
+                },
 
-              PopupMenuItem<String>(
-                value: "columns",
-                child: Text(
-                  "Columns",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
-                  ),
-                ),
-              ),
+                itemBuilder: (context) => [
 
-              PopupMenuItem<String>(
-                value: "recycle",
-                child: Text(
-                  "Recycle Bin",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
+                  PopupMenuItem<String>(
+                    value: "filter",
+                    child: Text(
+                      "Filter Media",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
                   ),
-                ),
-              ),
 
-              PopupMenuItem<String>(
-                value: "setting",
-                child: Text(
-                  "Settings",
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    fontFamily: FontFamily.robotoRegular,
+                  PopupMenuItem<String>(
+                    value: "sort",
+                    child: Text(
+                      "Sort By",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
                   ),
-                ),
+
+                  PopupMenuItem<String>(
+                    value: "group",
+                    child: Text(
+                      "Group By",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
+                  ),
+
+                  PopupMenuItem<String>(
+                    value: "columns",
+                    child: Text(
+                      "Columns",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
+                  ),
+
+                  PopupMenuItem<String>(
+                    value: "recycle",
+                    child: Text(
+                      "Recycle Bin",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
+                  ),
+
+                  PopupMenuItem<String>(
+                    value: "setting",
+                    child: Text(
+                      "Settings",
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontFamily: FontFamily.robotoRegular,
+                      ),
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(width: 16),
             ],
-          ),
-        ],
+          );
+        }),
       ),
-
       body: Obx(() {
+        if (controller.smartSearchController.isAnalyzing.value) {
+          return const Center(child: SplashLoader());
+        }
+
         if (!controller.firstPageLoaded.value &&
             controller.filteredMedia.isEmpty) {
           return const SizedBox();
@@ -226,312 +530,449 @@ class _PhotosScreenState extends State<PhotosScreen> {
           return const _NoMediaFound();
         }
 
-        final grouped = controller.groupedMedia;
-
-        // return GestureDetector(
-        //   behavior: HitTestBehavior.translucent,
-        //   onTap: () {
-        //     _showScrollButtonTemporarily();
-        //   },
-        //   onScaleStart: (details) {
-        //     controller.onGridScaleStart();
-        //   },
-        //
-        //   onScaleUpdate: (details) {
-        //     controller.onGridScaleUpdate(details.scale);
-        //   },
-        //
-        //   child: ListView.builder(
-        //     padding: const EdgeInsets.only(top: 8, bottom: 30),
-        //     itemCount: _getTotalItemCount(grouped),
-        //     itemBuilder: (context, index) {
-        //       return _buildItem(context, grouped, index);
-        //     },
-        //   ),
-        // );
-        return GestureDetector(
+        final rows = controller.galleryRows;
+        if (_floatingDate.value.isEmpty && rows.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _updateFloatingDate();
+            }
+          });
+        }
+        final int columns = controller.crossAxisCount.value.clamp(2, 8);
+        final List<_MosaicEntry> entries = columns == 3
+            ? _mosaicEntries(controller.groupedMedia)
+            : _columnEntries(controller.groupedMedia, columns);
+        return Listener(
           behavior: HitTestBehavior.translucent,
-
-          onTap: () {
-            _showScrollButtonTemporarily();
+          onPointerDown: (event) {
+            _lastPointerPosition = event.position;
+            _trackPinchDown(event.pointer, event.position);
           },
 
-          onScaleStart: (details) {
-            _showScrollButtonTemporarily();
-
-            controller.onGridScaleStart();
+          onPointerMove: (event) {
+            _updateDragSelection(event.position);
+            _trackPinchMove(event.pointer, event.position);
+          },
+          onPointerUp: (event) {
+            _lastPointerPosition = event.position;
+            _trackPinchEnd(event.pointer);
+            _endDragSelection();
+          },
+          onPointerCancel: (event) {
+            _trackPinchEnd(event.pointer);
+            _endDragSelection();
           },
 
-          onScaleUpdate: (details) {
-            _showScrollButtonTemporarily();
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () {
+              _showScrollControls();
+            },
 
-            controller.onGridScaleUpdate(
-              details.scale,
-            );
-          },
+            child: SizedBox(
+              width: double.infinity,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification is ScrollStartNotification) {
+                        _isScrolling = true;
 
-          child: Stack(
-            children: [
+                        _scrollButtonTimer?.cancel();
+                        _showScrollButton.value = true;
+                        _showFloatingDate.value = true;
+                        _updateScrollThumbPosition();
 
-              // =====================================================
-              // MAIN SCROLLABLE PHOTO GRID
-              // =====================================================
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) {
+                            _updateFloatingDate();
+                          }
+                        });
+                      }
 
-              NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  _showScrollButtonTemporarily();
+                      if (notification is ScrollUpdateNotification) {
+                        _isScrolling = true;
 
-                  return false;
-                },
+                        _showScrollButton.value = true;
+                        _showFloatingDate.value = true;
 
-                child: ListView.builder(
-                  controller: _scrollController,
+                        _scrollButtonTimer?.cancel();
+                        _updateScrollThumbPosition();
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) {
+                            _updateFloatingDate();
+                          }
+                        });
+                      }
 
-                  padding: const EdgeInsets.only(
-                    top: 8,
-                    bottom: 30,
-                  ),
+                      if (notification is ScrollEndNotification) {
+                        _isScrolling = false;
 
-                  itemCount:
-                  _getTotalItemCount(grouped),
+                        _scrollButtonTimer?.cancel();
 
-                  itemBuilder: (context, index) {
-                    return _buildItem(
-                      context,
-                      grouped,
-                      index,
-                    );
-                  },
-                ),
-              ),
+                        _scrollButtonTimer = Timer(
+                          const Duration(milliseconds: 1000),
+                          () {
+                            if (!mounted) return;
 
-              // =====================================================
-              // RIGHT SIDE UP / DOWN BUTTON
-              // =====================================================
+                            _showScrollButton.value = false;
+                            _showFloatingDate.value = false;
+                          },
+                        );
 
-              Positioned(
-                right: 0,
-                top: 8,
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) {
+                            _updateFloatingDate();
+                          }
+                        });
+                      }
 
-                child: AnimatedOpacity(
-                  duration: const Duration(
-                    milliseconds: 250,
-                  ),
+                      return false;
+                    },
 
-                  opacity:
-                  _showScrollButton ? 1.0 : 0.0,
-
-                  child: IgnorePointer(
-                    ignoring: !_showScrollButton,
-
-                    child: GestureDetector(
-                      onTap: () {
-                        _showScrollButtonTemporarily();
+                    child: RefreshIndicator(
+                      onRefresh: () async {
+                        await controller.refreshMedia();
                       },
 
-                      child: Container(
-                        width: 42,
-                        height: 68,
+                      child: ListView.builder(
+                        controller: _scrollController,
 
+                        physics: controller.isDragSelecting.value || _pinchZooming
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
+
+                        padding: const EdgeInsets.only(top: 8, bottom: 130),
+
+                        cacheExtent: 600,
+
+                        addAutomaticKeepAlives: false,
+
+                        addRepaintBoundaries: true,
+
+                        itemCount: entries.length,
+
+                        itemBuilder: (context, index) {
+                          return _buildMosaicEntry(context, entries[index], index);
+                        },
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: 140,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: const Color(0xff333333),
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(20),
-                            bottomLeft: Radius.circular(20),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: light
+                                ? const [Color(0x00F6F7F9), Color(0xF2F6F7F9)]
+                                : const [Color(0x000A0E14), Color(0xF20A0E14)],
                           ),
-
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(
-                                0.20,
-                              ),
-                              blurRadius: 6,
-                              offset: const Offset(
-                                -2,
-                                2,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        child: Column(
-                          mainAxisAlignment:
-                          MainAxisAlignment.center,
-
-                          children: [
-
-                            // ===============================
-                            // UP
-                            // ===============================
-
-                            SizedBox(
-                              height: 30,
-                              width: 42,
-
-                              child: Material(
-                                color: Colors.transparent,
-
-                                child: InkWell(
-                                  onTap: _scrollUp,
-
-                                  borderRadius:
-                                  const BorderRadius.only(
-                                    topLeft:
-                                    Radius.circular(20),
-                                  ),
-
-                                  child: const Icon(
-                                    Icons.keyboard_arrow_up,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            SizedBox(
-                              height: 30,
-                              width: 42,
-
-                              child: Material(
-                                color: Colors.transparent,
-
-                                child: InkWell(
-                                  onTap: _scrollDown,
-
-                                  borderRadius:
-                                  const BorderRadius.only(
-                                    bottomLeft:
-                                    Radius.circular(20),
-                                  ),
-
-                                  child: const Icon(
-                                    Icons.keyboard_arrow_down,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                     ),
                   ),
-                ),
+                  Positioned(
+                    top: 8,
+                    left: 0,
+                    right: 0,
+                    child: Obx(() {
+                      if (!_showFloatingDate.value ||
+                          _floatingDate.value.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return IgnorePointer(
+                        child: Center(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 150),
+                            child: Container(
+                              key: ValueKey(_floatingDate.value),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 13,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xff333333),
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.25),
+                                    blurRadius: 5,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                _floatingDate.value,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+
+                  Obx(
+                    () => AnimatedPositioned(
+                      duration: const Duration(milliseconds: 80),
+                      curve: Curves.linear,
+                      right: 0,
+                      top: _scrollThumbTop.value,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 180),
+                        opacity: _showScrollButton.value ? 1.0 : 0.0,
+
+                            child: IgnorePointer(
+                              ignoring: !_showScrollButton.value,
+
+                              child: Container(
+                                width: 38,
+                                height: 58,
+
+                                decoration: const BoxDecoration(
+                                  color: Color(0xff333333),
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(20),
+                                    bottomLeft: Radius.circular(20),
+                                  ),
+                                ),
+
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: _scrollUp,
+                                        child: const Icon(
+                                          Icons.keyboard_arrow_up,
+                                          color: Colors.white,
+                                          size: 21,
+                                        ),
+                                      ),
+                                    ),
+
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: _scrollDown,
+                                        child: const Icon(
+                                          Icons.keyboard_arrow_down,
+                                          color: Colors.white,
+                                          size: 21,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                  Positioned(
+                    bottom: 18,
+                    left: 0,
+                    right: 0,
+                    child: Obx(
+                      () => AnimatedOpacity(
+                        duration: const Duration(milliseconds: 180),
+                        opacity: _showScrollButton.value ? 1 : 0,
+
+                        child: IgnorePointer(
+                          ignoring: !_showScrollButton.value,
+
+                          child: Center(
+                            child: GestureDetector(
+                              onTap: () {
+                                _showScrollControls();
+                                if (!_scrollController.hasClients) return;
+                                _scrollController.animateTo(
+                                  0,
+                                  duration: const Duration(milliseconds: 500),
+                                  curve: Curves.easeOut,
+                                );
+                              },
+
+                              child: Container(
+                                width: 46,
+                                height: 46,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xff333333),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.25),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+
+                                child: const Icon(
+                                  Icons.arrow_upward,
+                                  color: Colors.white,
+                                  size: 25,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         );
       }),
     );
   }
 
-  int _getTotalItemCount(List<GroupSection> grouped) {
-    int count = 0;
-    for (final section in grouped) {
+  static const double _mosaicGap = 2;
+
+  List<_MosaicEntry> _mosaicEntries(List<GroupSection> sections) {
+    const List<_MosaicPattern> order = [
+      _MosaicPattern.row,
+      _MosaicPattern.bigLeft,
+      _MosaicPattern.row,
+    ];
+
+    final List<_MosaicEntry> entries = <_MosaicEntry>[];
+    for (final GroupSection section in sections) {
       if (section.title.isNotEmpty) {
-        count++;
+        entries.add(_MosaicEntry.header(section.title, section.media.length));
       }
-
-      count +=
-          (section.media.length + controller.crossAxisCount.value - 1) ~/
-          controller.crossAxisCount.value;
+      final List<AssetEntity> items = section.media;
+      int index = 0;
+      int cycle = 0;
+      while (index < items.length) {
+        _MosaicPattern pattern = order[cycle % order.length];
+        final int remaining = items.length - index;
+        final int take = remaining < 3 ? remaining : 3;
+        if (take < 3) {
+          pattern = _MosaicPattern.row;
+        }
+        entries.add(
+          _MosaicEntry.block(pattern, items.sublist(index, index + take)),
+        );
+        index += take;
+        cycle++;
+      }
     }
-
-    return count;
+    return entries;
   }
 
-  Widget _buildItem(
-    BuildContext context,
-    List<GroupSection> grouped,
-    int index,
+  List<_MosaicEntry> _columnEntries(
+    List<GroupSection> sections,
+    int columns,
   ) {
-    int currentIndex = 0;
-
-    final columns = controller.crossAxisCount.value;
-
-    for (final section in grouped) {
-      final title = section.title;
-      final media = section.media;
-
-      // Group header
-      if (title.isNotEmpty) {
-        if (index == currentIndex) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontFamily: FontFamily.robotoBold,
-                    ),
-                  ),
-                ),
-
-                if (controller.showFileCount.value)
-                  Text(
-                    "${media.length}",
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontFamily: FontFamily.robotoRegular,
-                      color: const Color(0xff888888),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        }
-
-        currentIndex++;
+    final List<_MosaicEntry> entries = <_MosaicEntry>[];
+    for (final GroupSection section in sections) {
+      if (section.title.isNotEmpty) {
+        entries.add(_MosaicEntry.header(section.title, section.media.length));
       }
-
-      final rowCount = (media.length + columns - 1) ~/ columns;
-
-      for (int row = 0; row < rowCount; row++) {
-        if (index == currentIndex) {
-          final start = row * columns;
-
-          final end = (start + columns > media.length)
-              ? media.length
-              : start + columns;
-
-          final rowMedia = media.sublist(start, end);
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final asset in rowMedia)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(1.5),
-                      child: GestureDetector(
-                        onTap: () {
-                          Get.to(() => PhotoViewScreen(asset: asset));
-                        },
-                        child: MediaItem(asset: asset),
-                      ),
-                    ),
-                  ),
-
-                for (int i = rowMedia.length; i < columns; i++)
-                  const Expanded(child: SizedBox()),
-              ],
-            ),
-          );
-        }
-
-        currentIndex++;
+      final List<AssetEntity> items = section.media;
+      for (int index = 0; index < items.length; index += columns) {
+        final int end = index + columns > items.length
+            ? items.length
+            : index + columns;
+        entries.add(
+          _MosaicEntry.block(_MosaicPattern.row, items.sublist(index, end)),
+        );
       }
     }
-
-    return const SizedBox();
+    return entries;
   }
+
+  Widget _buildMosaicEntry(BuildContext context, _MosaicEntry entry, int index) {
+    if (entry.title != null) {
+      final GlobalKey headerKey = _dateHeaderKeys.putIfAbsent(
+        entry.title!,
+        () => GlobalKey(),
+      );
+      return Container(
+        key: headerKey,
+        padding: EdgeInsets.fromLTRB(20, index == 0 ? 8 : 20, 20, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                entry.title!,
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.light
+                      ? const Color(0xFF111827)
+                      : const Color(0xFFF8FAFC),
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontWeight: FontWeight.w700,
+                  fontSize: 19,
+                ),
+              ),
+            ),
+            if (controller.showFileCount.value)
+              Text(
+                '${entry.count}',
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.light
+                      ? const Color(0xFF8A94A8)
+                      : Colors.white54,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: _mosaicGap),
+      child: _MosaicBlock(
+        pattern: entry.pattern!,
+        items: entry.items,
+        gap: _mosaicGap,
+        columns: entry.pattern == _MosaicPattern.bigLeft
+            ? 3
+            : controller.crossAxisCount.value.clamp(2, 8),
+        tileBuilder: _photoTile,
+      ),
+    );
+  }
+
+  Widget _photoTile(AssetEntity asset, bool big) {
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: () {
+          if (controller.isSelectionMode.value) {
+            controller.togglePhotoSelection(asset);
+            return;
+          }
+          Get.to(() => PhotoViewScreen(asset: asset));
+        },
+        onLongPress: () {
+          _startDragSelectionAfterLongPress(asset);
+        },
+        child: MediaItem(
+          key: controller.selectionKeyFor(asset.id),
+          asset: asset,
+          expand: true,
+          big: big,
+        ),
+      ),
+    );
+  }
+
 
   Widget _filterRow({
     required String title,
@@ -555,7 +996,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontFamily: FontFamily.robotoRegular,
-                    color: const Color(0xff333333),
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -569,7 +1010,9 @@ class _PhotosScreenState extends State<PhotosScreen> {
             child: Icon(
               value ? Icons.check_circle : Icons.radio_button_unchecked,
               size: 19,
-              color: value ? const Color(0xff444444) : const Color(0xffAAAAAA),
+              color: value
+                  ? Theme.of(context).colorScheme.onSurface
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -589,7 +1032,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: InnerChrome.dialogBg,
+          surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 42),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -606,6 +1050,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontFamily: FontFamily.robotoBold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -684,10 +1129,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xffEEEEEE),
-                            foregroundColor: Colors.black87,
+                            backgroundColor: InnerChrome.dialogSecondaryBg,
+                            foregroundColor: InnerChrome.dialogSecondaryFg,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                           child: const Text(
@@ -705,7 +1150,6 @@ class _PhotosScreenState extends State<PhotosScreen> {
                         height: 44,
                         child: TextButton(
                           onPressed: () async {
-                            // Actual controller values ONLY on OK
                             controller.filterImages.value = images.value;
                             controller.filterVideos.value = videos.value;
                             controller.filterGifs.value = gifs.value;
@@ -718,10 +1162,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xff292929),
-                            foregroundColor: Colors.white,
+                            backgroundColor: InnerChrome.dialogPrimaryBg,
+                            foregroundColor: InnerChrome.dialogPrimaryFg,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                           child: const Text(
@@ -758,7 +1202,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontFamily: FontFamily.robotoRegular,
-                    color: const Color(0xff333333),
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -773,8 +1217,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     : Icons.radio_button_unchecked,
                 size: 19,
                 color: selectedSort.value == title
-                    ? const Color(0xff444444)
-                    : const Color(0xffAAAAAA),
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -804,7 +1248,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontFamily: FontFamily.robotoRegular,
-                    color: const Color(0xff333333),
+                    color: AppColors.fg(const Color(0xff333333)),
                   ),
                 ),
               ),
@@ -819,8 +1263,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     : Icons.radio_button_unchecked,
                 size: 19,
                 color: selectedOrder.value == value
-                    ? const Color(0xff444444)
-                    : const Color(0xffAAAAAA),
+                    ? AppColors.fg(const Color(0xff444444))
+                    : AppColors.fg(const Color(0xffAAAAAA)),
               ),
             ),
           ],
@@ -836,7 +1280,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: InnerChrome.dialogBg,
+          surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 42),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -853,6 +1298,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontFamily: FontFamily.robotoBold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -893,8 +1339,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xffEEEEEE),
-                            foregroundColor: Colors.black87,
+                            backgroundColor: InnerChrome.dialogSecondaryBg,
+                            foregroundColor: InnerChrome.dialogSecondaryFg,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(9),
                             ),
@@ -921,8 +1367,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xff292929),
-                            foregroundColor: Colors.white,
+                            backgroundColor: InnerChrome.dialogPrimaryBg,
+                            foregroundColor: InnerChrome.dialogPrimaryFg,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(9),
                             ),
@@ -952,7 +1398,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: InnerChrome.dialogBg,
+          surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 39),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -969,6 +1416,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontFamily: FontFamily.robotoBold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -1034,8 +1482,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                               fontSize: 13,
                               fontFamily: FontFamily.robotoRegular,
                               color: selectedFileCount.value
-                                  ? const Color(0xff333333)
-                                  : const Color(0xff999999),
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -1049,8 +1499,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                                 : Icons.radio_button_unchecked,
                             size: 19,
                             color: selectedFileCount.value
-                                ? const Color(0xff444444)
-                                : const Color(0xffAAAAAA),
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -1070,10 +1522,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xffEEEEEE),
-                            foregroundColor: Colors.black87,
+                            backgroundColor: InnerChrome.dialogSecondaryBg,
+                            foregroundColor: InnerChrome.dialogSecondaryFg,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                           child: const Text(
@@ -1100,10 +1552,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                             Navigator.pop(dialogContext);
                           },
                           style: TextButton.styleFrom(
-                            backgroundColor: const Color(0xff292929),
-                            foregroundColor: Colors.white,
+                            backgroundColor: InnerChrome.dialogPrimaryBg,
+                            foregroundColor: InnerChrome.dialogPrimaryFg,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                           child: const Text(
@@ -1142,7 +1594,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontFamily: FontFamily.robotoRegular,
-                      color: const Color(0xff333333),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -1158,8 +1610,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     : Icons.radio_button_unchecked,
                 size: 19,
                 color: selectedGroup.value == title
-                    ? const Color(0xff444444)
-                    : const Color(0xffAAAAAA),
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1191,7 +1643,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 13,
                       fontFamily: FontFamily.robotoRegular,
-                      color: const Color(0xff333333),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -1207,8 +1659,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     : Icons.radio_button_unchecked,
                 size: 19,
                 color: selectedOrder.value == value
-                    ? const Color(0xff444444)
-                    : const Color(0xffAAAAAA),
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1224,7 +1676,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: InnerChrome.dialogBg,
+          surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 30),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -1241,6 +1694,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontFamily: FontFamily.robotoBold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -1301,10 +1755,10 @@ class _PhotosScreenState extends State<PhotosScreen> {
                       Navigator.pop(dialogContext);
                     },
                     style: TextButton.styleFrom(
-                      backgroundColor: const Color(0xff292929),
-                      foregroundColor: Colors.white,
+                      backgroundColor: InnerChrome.dialogPrimaryBg,
+                      foregroundColor: InnerChrome.dialogPrimaryFg,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                     child: const Text("OK", style: TextStyle(fontSize: 14)),
@@ -1341,7 +1795,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontFamily: FontFamily.robotoRegular,
-                      color: const Color(0xff333333),
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -1358,8 +1812,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                     : Icons.radio_button_unchecked,
                 size: 19,
                 color: selectedColumns.value == value
-                    ? const Color(0xff444444)
-                    : const Color(0xffAAAAAA),
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -1369,49 +1823,136 @@ class _PhotosScreenState extends State<PhotosScreen> {
   }
 }
 
-class MediaItem extends StatelessWidget {
+class MediaItem extends StatefulWidget {
   final AssetEntity asset;
+  final bool expand;
+  final bool big;
 
   const MediaItem({
     super.key,
     required this.asset,
+    this.expand = false,
+    this.big = false,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final PhotosController controller =
-    Get.find<PhotosController>();
+  State<MediaItem> createState() => _MediaItemState();
+}
 
-    return AspectRatio(
-      aspectRatio: 1,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(2),
+class _MediaItemState extends State<MediaItem> {
+  final PhotosController controller = Get.find<PhotosController>();
+
+  late Future<Uint8List?> _thumbnailFuture;
+
+  AssetEntity get asset => widget.asset;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnailFuture = controller.getThumbnail(widget.asset);
+  }
+
+  @override
+  void dispose() {
+    controller.removeSelectionKey(widget.asset.id);
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.asset.id != widget.asset.id) {
+      _thumbnailFuture = controller.getThumbnail(widget.asset);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget tile = ClipRRect(
+        borderRadius: BorderRadius.circular(widget.expand ? 0 : 2),
+
         child: FutureBuilder<Uint8List?>(
-          future: controller.getThumbnail(asset),
+          future: _thumbnailFuture,
+
           builder: (context, snapshot) {
             if (!snapshot.hasData || snapshot.data == null) {
-              return Container(
-                color: Colors.grey.shade300,
+              return ColoredBox(
+                color: Theme.of(context).brightness == Brightness.light
+                    ? const Color(0xFFE8EDF2)
+                    : const Color(0xFF1A2230),
               );
             }
 
             return Stack(
               fit: StackFit.expand,
+
               children: [
                 Image.memory(
                   snapshot.data!,
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
+                  filterQuality: FilterQuality.low,
+                  cacheWidth: 300,
                 ),
 
-                if (asset.type == AssetType.video)
+                if (asset.type == AssetType.video && widget.expand && widget.big)
+                  const Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0x73000000),
+                      ),
+                      child: SizedBox(
+                        width: 46,
+                        height: 46,
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 30,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (asset.type == AssetType.video &&
+                    widget.expand &&
+                    asset.videoDuration.inSeconds > 0)
+                  Positioned(
+                    right: 6,
+                    bottom: 5,
+                    child: Text(
+                      _videoClock(asset.videoDuration),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        shadows: [
+                          Shadow(color: Color(0xB3000000), blurRadius: 4),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (asset.type == AssetType.video &&
+                    widget.expand &&
+                    !widget.big &&
+                    asset.videoDuration.inSeconds <= 0)
+                  const Positioned(
+                    right: 5,
+                    bottom: 4,
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                if (asset.type == AssetType.video && !widget.expand)
                   Positioned(
                     right: 5,
                     bottom: 5,
                     child: Container(
                       padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Colors.black54,
+                      decoration: BoxDecoration(
+                        color: AppColors.surface(Colors.black54),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
@@ -1421,14 +1962,208 @@ class MediaItem extends StatelessWidget {
                       ),
                     ),
                   ),
+
+                Obx(() {
+                  if (!controller.isSelectionMode.value) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final selected = controller.isPhotoSelected(asset);
+
+                  return Positioned(
+                    top: 6,
+                    left: 6,
+
+                    child: GestureDetector(
+                      onTap: () {
+                        controller.togglePhotoSelection(asset);
+                      },
+
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+
+                        width: 25,
+                        height: 25,
+
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? Colors.black
+                              : AppColors.surface(Colors.black26),
+
+                          shape: BoxShape.circle,
+
+                          border: Border.all(
+                            color: AppColors.border(Colors.white),
+                            width: 1.5,
+                          ),
+                        ),
+
+                        child: selected
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 17,
+                              )
+                            : null,
+                      ),
+                    ),
+                  );
+                }),
               ],
             );
           },
         ),
-      ),
+    );
+    if (!widget.expand) {
+      return AspectRatio(aspectRatio: 1, child: tile);
+    }
+    return tile;
+  }
+}
+
+String _videoClock(Duration duration) {
+  final int hours = duration.inHours;
+  final int minutes = duration.inMinutes.remainder(60);
+  final int seconds = duration.inSeconds.remainder(60);
+  if (hours > 0) {
+    return '$hours:'
+        '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
+}
+
+enum _MosaicPattern { row, bigLeft }
+
+class _MosaicEntry {
+  final String? title;
+  final int count;
+  final _MosaicPattern? pattern;
+  final List<AssetEntity> items;
+
+  const _MosaicEntry.header(this.title, this.count)
+    : pattern = null,
+      items = const [];
+
+  const _MosaicEntry.block(this.pattern, this.items) : title = null, count = 0;
+}
+
+class _MosaicBlock extends StatelessWidget {
+  final _MosaicPattern pattern;
+  final List<AssetEntity> items;
+  final double gap;
+  final int columns;
+  final Widget Function(AssetEntity asset, bool big) tileBuilder;
+
+  const _MosaicBlock({
+    required this.pattern,
+    required this.items,
+    required this.gap,
+    required this.columns,
+    required this.tileBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final int span = pattern == _MosaicPattern.bigLeft ? 3 : columns;
+        final double tile =
+            (constraints.maxWidth - gap * (span - 1)) / span;
+        final double big = tile * 2 + gap;
+
+        Widget cell(int index, double size, {bool isBig = false}) {
+          return SizedBox(
+            width: size,
+            height: size,
+            child: tileBuilder(items[index], isBig),
+          );
+        }
+
+        if (pattern == _MosaicPattern.bigLeft && items.length == 3) {
+          return SizedBox(
+            height: big,
+            child: Row(
+              children: [
+                cell(0, big, isBig: true),
+                SizedBox(width: gap),
+                Column(
+                  children: [
+                    cell(1, tile),
+                    SizedBox(height: gap),
+                    cell(2, tile),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Row(
+          children: [
+            for (int i = 0; i < items.length; i++) ...[
+              if (i != 0) SizedBox(width: gap),
+              cell(i, tile),
+            ],
+          ],
+        );
+      },
     );
   }
 }
+
+class _CircleIconButton extends StatelessWidget {
+  final IconData icon;
+  final bool filled;
+  final VoidCallback? onTap;
+
+  const _CircleIconButton({
+    required this.icon,
+    this.filled = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool light = Theme.of(context).brightness == Brightness.light;
+    final Widget button = Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: light
+            ? Colors.white
+            : (filled ? Colors.white : const Color(0xFF121823)),
+        border: light
+            ? Border.all(color: const Color(0xFFE6EAEF))
+            : (filled
+                ? null
+                : Border.all(color: const Color(0xFF2A3342), width: 1)),
+        boxShadow: light
+            ? const [
+                BoxShadow(
+                  color: Color(0x12000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Icon(
+        icon,
+        size: 22,
+        color: light
+            ? const Color(0xFF111827)
+            : (filled ? const Color(0xFF0A0E14) : Colors.white),
+      ),
+    );
+    if (onTap == null) {
+      return button;
+    }
+    return GestureDetector(onTap: onTap, child: button);
+  }
+}
+
 class _NoMediaFound extends StatelessWidget {
   const _NoMediaFound();
 
@@ -1452,7 +2187,7 @@ class _NoMediaFound extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontFamily: FontFamily.robotoBold,
-              color: Colors.black,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
 
@@ -1464,7 +2199,7 @@ class _NoMediaFound extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               fontFamily: FontFamily.robotoRegular,
-              color: Color(0xff999999),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ],

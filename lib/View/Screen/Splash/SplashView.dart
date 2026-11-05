@@ -1,6 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:gallery_photos/Common/RequestAppPermissions.dart';
 import 'package:gallery_photos/View/Screen/BottomBar/DashBoard.dart';
 import 'package:gallery_photos/View/Screen/Splash/Controller/SplashController.dart';
+import 'package:gallery_photos/View/Screen/Splash/widgets/SplashLogo.dart';
+import 'package:gallery_photos/View/Screen/Splash/widgets/SplashWaveBanner.dart';
 import 'package:get/get.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -10,105 +16,123 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
-  final SplashController controller=Get.put(SplashController());
-
-  double progress = 0.0;
-  String loadingText = "Preparing gallery...";
+class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
+  final SplashController controller = Get.put(SplashController());
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  late final AnimationController _spin;
+  late final Animation<double> _angle;
 
   @override
   void initState() {
     super.initState();
-     WidgetsBinding.instance.addPostFrameCallback((_) {
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..forward();
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scale = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+    );
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..forward();
+    _angle = Tween<double>(begin: 0, end: 2 * math.pi).animate(
+      CurvedAnimation(parent: _spin, curve: Curves.easeOutCubic),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareApp();
     });
   }
 
   Future<void> _prepareApp() async {
-    try {
-      setState(() {
-        progress = 0.15;
-        loadingText = "Loading your photos...";
-      });
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
 
-      // Yahan saare photos/videos load honge
-      await controller.loadPhotos();
+    await RequestAppPermissions();
+    if (!mounted) return;
 
-      if (!mounted) return;
+    controller.startLoading();
+    Get.offAll(() => Dashboard());
+  }
 
-      setState(() {
-        progress = 1.0;
-        loadingText = "Gallery ready";
-      });
-
-      await Future.delayed(
-        const Duration(milliseconds: 250),
-      );
-
-      if (!mounted) return;
-
-      // Aapka existing Dashboard
-      Get.offAll(
-            () => Dashboard(),
-      );
-    } catch (e) {
-      debugPrint("Splash Error: $e");
-
-      if (!mounted) return;
-
-      Get.offAll(
-            () => Dashboard(),
-      );
-    }
+  @override
+  void dispose() {
+    _controller.dispose();
+    _spin.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xffF1F3F5),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.photo_library_outlined,
-                size: 70,
-                color: Color(0xff292929),
-              ),
+    final Size size = MediaQuery.of(context).size;
+    final double logoSize = size.width * 0.45;
 
-              const SizedBox(height: 20),
-
-              const Text(
-                "Gallery",
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.black,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            const Positioned.fill(child: SplashWaveBanner()),
+            Align(
+              alignment: const Alignment(0, -0.45),
+              child: FadeTransition(
+                opacity: _fade,
+                child: ScaleTransition(
+                  scale: _scale,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedBuilder(
+                        animation: _angle,
+                        builder: (context, _) {
+                          return SplashLogo(
+                            size: logoSize,
+                            angle: _angle.value,
+                          );
+                        },
+                      ),
+                      SizedBox(height: size.height * 0.0),
+                      ShaderMask(
+                        shaderCallback: (Rect rect) {
+                          return const LinearGradient(
+                            colors: [Color(0xFFCBD5E1), Color(0xFF818CF8)],
+                          ).createShader(rect);
+                        },
+                        child: Text(
+                          'Photos',
+                          style: TextStyle(
+                            fontFamily: "Plus Jakarta Sans",
+                            color: Colors.white,
+                            fontSize: size.width * 0.105,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'GALLERY',
+                        style: TextStyle(
+                          fontFamily: "Plus Jakarta Sans",
+                          color: const Color(0xFF3F8EF0),
+                          fontSize: size.width * 0.028,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 3.2,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-
-              const SizedBox(height: 30),
-
-              LinearProgressIndicator(
-                value: progress,
-                minHeight: 5,
-                borderRadius: BorderRadius.circular(10),
-                backgroundColor: Colors.grey.shade300,
-              ),
-
-              const SizedBox(height: 12),
-
-              Text(
-                loadingText,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

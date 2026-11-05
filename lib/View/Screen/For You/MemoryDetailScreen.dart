@@ -2,12 +2,15 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:gallery_photos/View/Constant/App_font.dart';
 import 'package:gallery_photos/View/Constant/Get_Storage.dart';
+import 'package:gallery_photos/View/Screen/For%20You/MemoryShareScreen.dart';
 import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
 import 'package:gallery_photos/View/Screen/For%20You/controller/MemoryDetailController.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class MemoryDetailScreen extends StatelessWidget {
   final String title;
@@ -30,12 +33,14 @@ class MemoryDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     if (assets.isEmpty) {
       return Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: InnerChrome.page,
         body: SafeArea(
           child: Center(
             child: Text(
               'No photos found',
-              style: const TextStyle(color: Colors.white, fontSize: 16),
+              style: TextStyle(
+                  fontFamily: 'Plus Jakarta Sans',
+                  color: InnerChrome.ink, fontSize: 16),
             ),
           ),
         ),
@@ -49,13 +54,14 @@ class MemoryDetailScreen extends StatelessWidget {
         date: date,
         assets: orderedAssets,
         initialIndex: initialIndex,
+        currentMemory: currentMemory,
       ),
       tag: '${title}_${date}_${assets.isNotEmpty ? assets.first.id : ''}',
     );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
-        controller.dismissIntro();
+        controller.showControls();
       },
       child: Obx(
         () => Scaffold(
@@ -72,7 +78,7 @@ class MemoryDetailScreen extends StatelessWidget {
                 ),
 
                 Positioned.fill(
-                  child: Container(color: Colors.black.withOpacity(0.50)),
+                  child: Container(color: AppColors.surface(Colors.black.withOpacity(0.50))),
                 ),
 
                 if (controller.showEndScreen.value)
@@ -122,12 +128,12 @@ class MemoryDetailScreen extends StatelessWidget {
                                 onTap: () {
                                   Get.back();
                                 },
-                                child: const SizedBox(
+                                child: SizedBox(
                                   width: 40,
                                   height: 40,
                                   child: Icon(
                                     Icons.arrow_back_ios_new,
-                                    color: Colors.white,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                     size: 20,
                                   ),
                                 ),
@@ -146,6 +152,7 @@ class MemoryDetailScreen extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: Colors.white,
+                                        fontFamily: 'Plus Jakarta Sans',
                                         fontSize: 15,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -164,27 +171,37 @@ class MemoryDetailScreen extends StatelessWidget {
                                 ),
                               ),
 
-                              // HEART
                               GestureDetector(
-                                onTap: () {},
-                                child: const SizedBox(
+                                onTap: controller.toggleLike,
+                                child: SizedBox(
                                   width: 40,
                                   height: 40,
                                   child: Icon(
-                                    Icons.favorite_border,
-                                    color: Colors.white,
+                                    controller.isLiked
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: controller.isLiked
+                                        ? Colors.red
+                                        : Colors.white,
                                     size: 23,
                                   ),
                                 ),
                               ),
 
                               GestureDetector(
-                                onTap: () {},
+                                onTap: () {
+                                  Get.to(
+                                    () => MemoryShareScreen(
+                                      title: controller.title,
+                                      assets: controller.assets,
+                                    ),
+                                  );
+                                },
                                 child: const SizedBox(
                                   width: 40,
                                   height: 40,
                                   child: Icon(
-                                    Icons.ios_share,
+                                    Icons.share,
                                     color: Colors.white,
                                     size: 21,
                                   ),
@@ -231,9 +248,6 @@ class MemoryDetailScreen extends StatelessWidget {
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // ============================
-                                          // MEMORY NAME
-                                          // ============================
                                           Text(
                                             controller.title.isEmpty
                                                 ? 'Exploring the Day'
@@ -241,6 +255,7 @@ class MemoryDetailScreen extends StatelessWidget {
                                             textAlign: TextAlign.center,
                                             style: const TextStyle(
                                               color: Colors.white,
+                                              fontFamily: 'Plus Jakarta Sans',
                                               fontSize: 30,
                                               fontWeight: FontWeight.w600,
                                               letterSpacing: 0.2,
@@ -256,9 +271,6 @@ class MemoryDetailScreen extends StatelessWidget {
 
                                           const SizedBox(height: 10),
 
-                                          // ============================
-                                          // DATE
-                                          // ============================
                                           Text(
                                             controller.date,
                                             textAlign: TextAlign.center,
@@ -267,6 +279,7 @@ class MemoryDetailScreen extends StatelessWidget {
                                               fontSize: 17,
                                               fontWeight: FontWeight.w400,
                                               letterSpacing: 0.5,
+                                              fontFamily: 'Plus Jakarta Sans',
                                               shadows: [
                                                 Shadow(
                                                   blurRadius: 15,
@@ -289,7 +302,7 @@ class MemoryDetailScreen extends StatelessWidget {
                   ),
 
                 if (controller.controlsVisible.value)
-                  _buildBottomControls(controller,context),
+                  _buildBottomControls(controller, context),
               ],
             ),
           ),
@@ -297,30 +310,25 @@ class MemoryDetailScreen extends StatelessWidget {
       ),
     );
   }
+
   List<AssetEntity> _getOrderedAssets() {
     if (assets.isEmpty) {
       return assets;
     }
 
-    final Map<String, dynamic> savedCovers =
-    Map<String, dynamic>.from(
-      GetStorageData.readObject(
-        GetStorageData.memoryCovers,
-      ) ??
-          {},
+    final Map<String, dynamic> savedCovers = Map<String, dynamic>.from(
+      GetStorageData.readObject(GetStorageData.memoryCovers) ?? {},
     );
 
     final String memoryKey = assets.first.id;
 
-    final String? coverId =
-    savedCovers[memoryKey]?.toString();
+    final String? coverId = savedCovers[memoryKey]?.toString();
 
     if (coverId == null || coverId.isEmpty) {
       return assets;
     }
 
-    final int coverIndex =
-    assets.indexWhere((asset) => asset.id == coverId);
+    final int coverIndex = assets.indexWhere((asset) => asset.id == coverId);
 
     if (coverIndex <= 0) {
       return assets;
@@ -328,14 +336,13 @@ class MemoryDetailScreen extends StatelessWidget {
 
     final AssetEntity coverAsset = assets[coverIndex];
 
-    return [
-      coverAsset,
-      ...assets.where(
-            (asset) => asset.id != coverId,
-      ),
-    ];
+    return [coverAsset, ...assets.where((asset) => asset.id != coverId)];
   }
-  Widget _buildBottomControls(MemoryDetailController controller,BuildContext context) {
+
+  Widget _buildBottomControls(
+    MemoryDetailController controller,
+    BuildContext context,
+  ) {
     return Positioned(
       left: 0,
       right: 0,
@@ -396,8 +403,8 @@ class MemoryDetailScreen extends StatelessWidget {
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: selected
-                                    ? Colors.white
-                                    : Colors.white.withOpacity(0.30),
+                                    ? AppColors.border(Colors.white)
+                                    : AppColors.border(Colors.white.withOpacity(0.30)),
                                 width: selected ? 2 : 1,
                               ),
                             ),
@@ -417,7 +424,12 @@ class MemoryDetailScreen extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _RoundButton(icon: Icons.volume_up_outlined, onTap: () {}),
+                    Obx(
+                      () => _RoundButton(
+                        icon: controller.isMusicMuted.value ?Icons.volume_off:Icons.volume_up_outlined,
+                        onTap: controller.toggleMusicMute,
+                      ),
+                    ),
 
                     const SizedBox(width: 55),
 
@@ -446,22 +458,33 @@ class MemoryDetailScreen extends StatelessWidget {
       ),
     );
   }
+
   void _showMusicDialog(
-      BuildContext context,
-      MemoryDetailController controller,
-      ) {
+    BuildContext context,
+    MemoryDetailController controller,
+  ) {
     final List<Map<String, String>> musicList = [
       {
         'name': 'Audio 1',
         'duration': '01:00',
         'size': '',
-        'path': 'Music/audio1.mp3',
+        'path': 'Music/audio3.mp3',
       },
       {
         'name': 'Audio 2',
         'duration': '01:00',
         'size': '',
-        'path': 'Music/audio2.mp3',
+        'path': 'Music/audio4.mp3',
+      },{
+        'name': 'Audio 2',
+        'duration': '01:00',
+        'size': '',
+        'path': 'Music/audio5.mp3',
+      },{
+        'name': 'Audio 2',
+        'duration': '01:00',
+        'size': '',
+        'path': 'Music/audio6.mp3',
       },
     ];
 
@@ -475,132 +498,120 @@ class MemoryDetailScreen extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).dialogBackgroundColor,
               borderRadius: BorderRadius.circular(15),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Align(
+                Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Music',
                     style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
+                      fontFamily: 'Plus Jakarta Sans',
                     ),
                   ),
                 ),
 
                 const SizedBox(height: 8),
 
-                ...musicList.map(
-                      (music) {
-                    return Obx(() {
-                      final bool selected =
-                          controller.selectedMusic.value ==
-                              music['name'];
+                ...musicList.map((music) {
+                  return Obx(() {
+                    final bool selected =
+                        controller.selectedMusicPath.value == music['path'];
 
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          // Selected music controller ko do
-                          await controller.selectMusic(
-                            name: music['name']!,
-                            path: music['path']!,
-                          );
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () async {
+                        await controller.selectMusic(
+                          name: music['name']!,
+                          path: music['path']!,
+                        );
 
-                          // Music select hone ke baad dialog close
-                          if (dialogContext.mounted) {
-                            Navigator.of(dialogContext).pop();
-                          }
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          child: Row(
-                            children: [
-                              // MUSIC ICON
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xffeeeeee),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.music_note,
-                                  size: 18,
-                                  color: Colors.black87,
-                                ),
+                        if (dialogContext.mounted) {
+                          Navigator.of(dialogContext).pop();
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 7),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(8),
                               ),
-
-                              const SizedBox(width: 10),
-
-                              // NAME + DETAILS
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      music['name']!,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-
-                                    const SizedBox(height: 2),
-
-                                    Text(
-                                      '${music['duration']} | '
-                                          '${music['size']} | 256kbps',
-                                      style: const TextStyle(
-                                        fontSize: 8,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              child: Icon(
+                                Icons.music_note,
+                                size: 18,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
+                            ),
 
-                              const SizedBox(width: 8),
+                            const SizedBox(width: 10),
 
-                              // CHECK / ADD
-                              AnimatedContainer(
-                                duration: const Duration(
-                                  milliseconds: 180,
-                                ),
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: selected
-                                      ? Colors.black87
-                                      : Colors.transparent,
-                                  border: selected
-                                      ? null
-                                      : Border.all(
-                                    color: Colors.black54,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    music['name']!,
+                                    style: TextStyle(
+                                        fontFamily: 'Plus Jakarta Sans',
+                                        color: Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 11,
+                                    ),
                                   ),
-                                ),
-                                child: Icon(
-                                  selected
-                                      ? Icons.check
-                                      : Icons.add,
-                                  size: 15,
-                                  color: selected
-                                      ? Colors.white
-                                      : Colors.black87,
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    music['duration']!,
+                                    style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                      fontFamily: 'Plus Jakarta Sans',
+                                        fontSize: 8,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(width: 8),
+
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.onSurface
+                                    : Colors.transparent,
+                                border: selected
+                                    ? null
+                                    : Border.all(
+                                  color: Theme.of(context).colorScheme.outline,
                                 ),
                               ),
-                            ],
-                          ),
+                              child: Icon(
+                                selected ? Icons.check : Icons.add,
+                                size: 15,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.surface
+                                    : Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                          ],
                         ),
-                      );
-                    });
-                  },
-                ),
+                      ),
+                    );
+                  });
+                }),
               ],
             ),
           ),
@@ -625,10 +636,7 @@ class _MemoryPhotoPage extends StatelessWidget {
     return TweenAnimationBuilder<double>(
       key: ValueKey(asset.id),
 
-      tween: Tween<double>(
-        begin: 1.0,
-        end: 1.35,
-      ),
+      tween: Tween<double>(begin: 1.0, end: 1.35),
 
       duration: const Duration(seconds: 5),
       curve: Curves.easeOutCubic,
@@ -641,13 +649,11 @@ class _MemoryPhotoPage extends StatelessWidget {
         );
       },
 
-      child: _FullScreenImage(
-        asset: asset,
-        controller: controller,
-      ),
+      child: _FullScreenImage(asset: asset, controller: controller),
     );
   }
 }
+
 class _FullScreenImage extends StatelessWidget {
   final AssetEntity asset;
   final MemoryDetailController? controller;
@@ -706,7 +712,7 @@ class _Thumbnail extends StatelessWidget {
       future: asset.thumbnailDataWithSize(const ThumbnailSize(180, 180)),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data == null) {
-          return Container(color: Colors.grey.shade800);
+          return Container(color: AppColors.surface(Colors.grey.shade800));
         }
 
         return Image.memory(
@@ -734,9 +740,9 @@ class _RoundButton extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.72),
+          color: AppColors.surface(Colors.black.withOpacity(0.72)),
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withOpacity(0.12)),
+          border: Border.all(color: AppColors.border(Colors.white.withOpacity(0.12))),
         ),
         child: Icon(icon, color: Colors.white, size: size * 0.52),
       ),
@@ -764,13 +770,13 @@ class _MemoryEndScreen extends StatelessWidget {
       duration: const Duration(milliseconds: 500),
       curve: Curves.easeOutCubic,
       builder: (context, value, child) {
-        return Opacity(opacity: value, child: child);
+        return Opacity(
+          opacity: value,
+          child: child,
+        );
       },
       child: Stack(
         children: [
-          // =========================
-          // CLOSE BUTTON
-          // =========================
           Positioned(
             top: 4,
             right: 10,
@@ -797,21 +803,9 @@ class _MemoryEndScreen extends StatelessWidget {
                   final screenWidth = constraints.maxWidth;
                   final screenHeight = constraints.maxHeight;
 
-                  // MAIN IMAGE (screenshot jevu)
                   final imageWidth = (screenWidth * 0.83).clamp(205.0, 390.0);
                   final imageHeight = (screenHeight * 0.50).clamp(265.0, 410.0);
 
-                  // WATCH NEXT CARDS (screenshot jevu - moti ane badi)
-                  final watchCardWidth = (screenWidth * 0.36).clamp(
-                    112.0,
-                    150.0,
-                  );
-                  final watchCardHeight = (watchCardWidth * 1.04).clamp(
-                    118.0,
-                    155.0,
-                  );
-
-                  // cards ni left padding
                   const double listLeftPadding = 20.0;
 
                   return Column(
@@ -849,7 +843,7 @@ class _MemoryEndScreen extends StatelessWidget {
                                   11,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.70),
+                                  color: AppColors.surface(Colors.black.withOpacity(0.70)),
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                                 child: Column(
@@ -865,6 +859,7 @@ class _MemoryEndScreen extends StatelessWidget {
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 18,
+                                        fontFamily: 'Plus Jakarta Sans',
                                         fontWeight: FontWeight.w700,
                                         height: 1.15,
                                       ),
@@ -878,6 +873,7 @@ class _MemoryEndScreen extends StatelessWidget {
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 13,
+                                        fontFamily: 'Plus Jakarta Sans',
                                         fontWeight: FontWeight.w400,
                                         height: 1.1,
                                       ),
@@ -895,10 +891,10 @@ class _MemoryEndScreen extends StatelessWidget {
                         height: 43,
                         padding: const EdgeInsets.symmetric(horizontal: 6),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.32),
+                          color: AppColors.surface(Colors.black.withOpacity(0.32)),
                           borderRadius: BorderRadius.circular(23),
                           border: Border.all(
-                            color: Colors.white.withOpacity(0.10),
+                            color: AppColors.border(Colors.white.withOpacity(0.10)),
                           ),
                         ),
                         child: Row(
@@ -919,30 +915,39 @@ class _MemoryEndScreen extends StatelessWidget {
                               ),
                             ),
                             GestureDetector(
-                              onTap: () {},
-                              child: const SizedBox(
+                              onTap: controller.toggleLike,
+                              child: SizedBox(
                                 width: 42,
                                 height: 41,
                                 child: Center(
                                   child: Icon(
-                                    Icons.favorite_border,
-                                    color: Colors.white,
+                                    controller.isLiked
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: controller.isLiked
+                                        ? Colors.red
+                                        : Colors.white,
                                     size: 19,
                                   ),
                                 ),
                               ),
                             ),
                             GestureDetector(
-                              onTap: () {},
-                              child: const SizedBox(
-                                width: 42,
-                                height: 41,
-                                child: Center(
-                                  child: Icon(
-                                    Icons.share_outlined,
-                                    color: Colors.white,
-                                    size: 19,
+                              onTap: () {
+                                Get.to(
+                                  () => MemoryShareScreen(
+                                    title: controller.title,
+                                    assets: controller.assets,
                                   ),
+                                );
+                              },
+                              child: const SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: Icon(
+                                  Icons.share,
+                                  color: Colors.white,
+                                  size: 21,
                                 ),
                               ),
                             ),
@@ -963,8 +968,8 @@ class _MemoryEndScreen extends StatelessWidget {
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 15,
+                              fontFamily: 'Plus Jakarta Sans',
                               fontWeight: FontWeight.w500,
-                              fontFamily: FontFamily.robotoBold,
                             ),
                           ),
                         ),
@@ -1056,7 +1061,7 @@ class _WatchNextCard extends StatelessWidget {
             children: [
               _Thumbnail(asset: asset),
               Positioned.fill(
-                child: Container(color: Colors.black.withOpacity(0.50)),
+                child: Container(color: AppColors.surface(Colors.black.withOpacity(0.50))),
               ),
 
               Positioned(

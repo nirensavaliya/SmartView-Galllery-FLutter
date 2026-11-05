@@ -3,14 +3,22 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
+import 'package:gallery_photos/Common/MediaActionService.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:gallery_photos/View/Constant/App_font.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:gallery_photos/View/Screen/Albums/Controller/AlbumsController.dart';
+import 'package:gallery_photos/View/Screen/CleanerScreen/Controller/CleanerController.dart';
+import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
 import 'package:gallery_photos/View/Screen/Photos/CopyMoveAlbumScreen.dart';
 import 'package:gallery_photos/View/Screen/Photos/PhotoViewScreen.dart';
 import 'package:gallery_photos/View/Screen/Photos/VideoViewScreen.dart';
 import 'package:gallery_photos/View/Screen/Photos/WallpaperScreen.dart';
+import 'package:gallery_photos/View/Screen/PlaceScreen/controller/PlacesController.dart';
 import 'package:gallery_photos/View/Screen/RecycleBin/Controller/RecycleBinController.dart';
+import 'package:gallery_photos/View/Screen/UtilityMedia/controller/UtilityMediaController.dart';
+import 'package:gallery_photos/View/Setting/Controller/SettingsController.dart';
+import 'package:gallery_photos/View/Setting/FileOperationService.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
@@ -19,6 +27,9 @@ import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
+import 'package:gallery_photos/View/Widget/ChromeDialog.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class PhotoViewController extends GetxController {
   final AssetEntity asset;
@@ -50,7 +61,7 @@ class PhotoViewController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    isFavorite.value = asset.isFavorite;
+    isFavorite.value = false;
   }
 
   void initializePhotoView() {
@@ -80,9 +91,20 @@ class PhotoViewController extends GetxController {
       if (result) {
         isFavorite.value = newValue;
 
-        final photosController = Get.find<PhotosController>();
+        if (Get.isRegistered<PhotosController>()) {
+          final photosController = Get.find<PhotosController>();
+          await photosController.toggleFavorite(asset);
+        }
 
-        await photosController.toggleFavorite(asset);
+        if (Get.isRegistered<UtilityMediaController>(
+          tag: UtilityMediaType.favorites.name,
+        )) {
+          final favoriteController = Get.find<UtilityMediaController>(
+            tag: UtilityMediaType.favorites.name,
+          );
+
+          await favoriteController.refreshMedia();
+        }
       }
     } catch (e) {
       debugPrint("PhotoView Favorite Error: $e");
@@ -90,7 +112,6 @@ class PhotoViewController extends GetxController {
   }
 
   AssetEntity get currentAsset {
-    // Rename ke baad latest asset return karo
     if (_renamedAsset != null && _renamedAsset!.id == asset.id) {
       return _renamedAsset!;
     }
@@ -219,9 +240,7 @@ class PhotoViewController extends GetxController {
         }
 
         if (controller.value.hasError) {
-          debugPrint(
-            "Mini Video Error: ${controller.value.errorDescription}",
-          );
+          debugPrint("Mini Video Error: ${controller.value.errorDescription}");
           return;
         }
 
@@ -240,12 +259,13 @@ class PhotoViewController extends GetxController {
 
     return _miniVideoToggleQueue;
   }
+
   Future<void> sharePhoto() async {
     try {
       final file = await asset.file;
 
       if (file == null) {
-        Get.snackbar("Share", "Unable to access this photo");
+        AppToast.show("Unable to access this photo");
         return;
       }
 
@@ -254,75 +274,36 @@ class PhotoViewController extends GetxController {
       );
     } catch (e) {
       debugPrint("Share Error: $e");
-      Get.snackbar("Share", "Unable to share photo");
+      AppToast.show("Unable to share photo");
     }
   }
 
   Future<void> deletePhoto() async {
     final String? action = await Get.dialog<String>(
-      AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text(
-          "Are you sure you want to delete the file?",
-          style: TextStyle(
-            fontFamily: FontFamily.robotoBold,
-            fontSize: 18,
-            color: const Color(0xff222222),
-          ),
+      ChromeDialog(
+        title: 'Delete file?',
+        message: 'Are you sure you want to delete the file?',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ChromeButton.ok(
+              label: 'Add to Recycle Bin',
+              onPressed: () => Get.back(result: 'recycle'),
+            ),
+            const SizedBox(height: 10),
+            ChromeButton.danger(
+              label: 'Delete permanently',
+              onPressed: () => Get.back(result: 'permanent'),
+            ),
+          ],
         ),
-        content: Text(
-          "Choose what you want to do with this file.",
-          style: TextStyle(
-            fontFamily: FontFamily.robotoRegular,
-            fontSize: 14,
-            color: const Color(0xff555555),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Get.back(result: "cancel");
-            },
-            child: Text(
-              "Cancel",
-              style: TextStyle(
-                fontFamily: FontFamily.robotoMedium,
-                color: const Color(0xff555555),
-              ),
-            ),
-          ),
-
-          TextButton(
-            onPressed: () {
-              Get.back(result: "recycle");
-            },
-            child: Text(
-              "Add to Recycle Bin",
-              style: TextStyle(
-                fontFamily: FontFamily.robotoMedium,
-                color: const Color(0xff333333),
-              ),
-            ),
-          ),
-
-          TextButton(
-            onPressed: () {
-              Get.back(result: "permanent");
-            },
-            child: Text(
-              "Delete Permanently",
-              style: TextStyle(
-                fontFamily: FontFamily.robotoMedium,
-                color: Colors.red,
-              ),
-            ),
-          ),
-        ],
       ),
     );
 
     if (action == null || action == "cancel") {
+      return;
+    }
+    if (!await MediaActionService.ensureMediaManagement()) {
       return;
     }
     try {
@@ -334,15 +315,10 @@ class PhotoViewController extends GetxController {
             : Get.put(RecycleBinController());
         final bool saved = await recycleController.addToRecycleBin(asset);
         if (!saved) {
-          Get.snackbar(
-            "Recycle Bin",
-            "Unable to save file in Recycle Bin",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
-          );
+          AppToast.show("Unable to save file in Recycle Bin");
           return;
         }
-        final List<String> result = await PhotoManager.editor.deleteWithIds([
+        final List<String> result = await MediaActionService.deleteIds([
           asset.id,
         ]);
         if (Get.isRegistered<AlbumsController>()) {
@@ -360,28 +336,17 @@ class PhotoViewController extends GetxController {
             }
           }
           Get.back();
-          Get.snackbar(
-            "Recycle Bin",
-            "File moved to Recycle Bin",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
-            duration: const Duration(seconds: 2),
-          );
-        } else {
+          AppToast.show("File moved to Recycle Bin");
+        } else if (!MediaActionService.waitingForPermission) {
           await recycleController.permanentlyDeleteSilentlyById(asset.id);
-          Get.snackbar(
-            "Delete",
-            "Unable to delete original file",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
-          );
+          AppToast.show("Unable to delete original file");
         }
 
         return;
       }
 
       if (action == "permanent") {
-        final List<String> result = await PhotoManager.editor.deleteWithIds([
+        final List<String> result = await MediaActionService.deleteIds([
           asset.id,
         ]);
         if (result.contains(asset.id)) {
@@ -397,35 +362,13 @@ class PhotoViewController extends GetxController {
           }
           Get.back();
 
-          Get.snackbar(
-            "Delete",
-            "File deleted permanently",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
-            duration: const Duration(seconds: 2),
-          );
-        } else {
-          Get.snackbar(
-            "Delete",
-            "Unable to delete file",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
-          );
+          AppToast.show("File deleted permanently");
+        } else if (!MediaActionService.waitingForPermission) {
+          AppToast.show("Unable to delete file");
         }
       }
-    } catch (e, stackTrace) {
-      debugPrint("====================================");
-      debugPrint("DELETE FILE ERROR");
-      debugPrint("$e");
-      debugPrintStack(stackTrace: stackTrace);
-      debugPrint("====================================");
-
-      Get.snackbar(
-        "Delete",
-        "Something went wrong",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+    } catch (e) {
+      AppToast.show("Something went wrong");
     } finally {
       isDeleting.value = false;
     }
@@ -443,11 +386,7 @@ class PhotoViewController extends GetxController {
       }
 
       if (file == null || !await file.exists()) {
-        Get.snackbar(
-          "Details",
-          "Unable to access this file",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Unable to access this file");
         return;
       }
 
@@ -476,37 +415,27 @@ class PhotoViewController extends GetxController {
       final int actualHeight = image.height;
 
       final String resolution = "$actualWidth × $actualHeight px";
-
-      debugPrint("================================");
-      debugPrint("DETAILS");
-      debugPrint("File       : $fileName");
-      debugPrint("Resolution : $resolution");
-      debugPrint("Size       : $fileSize bytes");
-      debugPrint("================================");
-
       final date = formatDate(current.createDateTime);
       final time = formatTime(current.createDateTime);
 
       Get.dialog(
         Dialog(
-          backgroundColor: Colors.white,
+          backgroundColor: InnerChrome.dialogBg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
           ),
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   "Details",
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black,
-                  ),
+                  style: ChromeText.title,
                 ),
 
                 const SizedBox(height: 20),
@@ -545,11 +474,12 @@ class PhotoViewController extends GetxController {
                     onPressed: () {
                       Get.back();
                     },
-                    child: const Text(
+                    child: Text(
                       "Close",
                       style: TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w500,
+                        color: InnerChrome.accent,
+                        fontFamily: 'Plus Jakarta Sans',
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -563,11 +493,7 @@ class PhotoViewController extends GetxController {
       debugPrint("Details Error: $e");
       debugPrintStack(stackTrace: stackTrace);
 
-      Get.snackbar(
-        "Details",
-        "Unable to load file details",
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show("Unable to load file details");
     }
   }
 
@@ -581,20 +507,20 @@ class PhotoViewController extends GetxController {
 
           child: Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.black87,
+              color: InnerChrome.dialogInk,
             ),
           ),
         ),
 
-        const Text(
+        Text(
           ": ",
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: Colors.black87,
+            color: InnerChrome.dialogInk,
           ),
         ),
 
@@ -604,45 +530,123 @@ class PhotoViewController extends GetxController {
             maxLines: maxLines,
             overflow: TextOverflow.ellipsis,
 
-            style: const TextStyle(fontSize: 14, color: Colors.black87),
+            style: TextStyle(fontSize: 14, color: InnerChrome.muted),
           ),
         ),
       ],
     );
   }
 
-  Future<void> lockPhoto() async {
-    final confirm = await Get.dialog<bool>(
-      AlertDialog(
-        title: const Text("Hide Photo?"),
-        content: const Text("Are you sure you want to hide this file?"),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Get.back(result: false);
-            },
-            child: const Text("Cancel"),
+  Future<bool?> _askToHide(String message) {
+    return Get.dialog<bool>(
+      Dialog(
+        backgroundColor: InnerChrome.dialogBg,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Hide Photo?',
+                style: TextStyle(
+                  color: InnerChrome.dialogInk,
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: TextStyle(
+                  color: InnerChrome.muted,
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 46,
+                      child: OutlinedButton(
+                        onPressed: () => Get.back(result: false),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: InnerChrome.dialogInk,
+                          side: BorderSide(color: InnerChrome.line, width: 1.4),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(
+                            fontFamily: 'Plus Jakarta Sans',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SizedBox(
+                      height: 46,
+                      child: ElevatedButton(
+                        onPressed: () => Get.back(result: true),
+                        style: ElevatedButton.styleFrom(
+                          elevation: 0,
+                          backgroundColor: InnerChrome.danger,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Hide',
+                          style: TextStyle(
+                            fontFamily: 'Plus Jakarta Sans',
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              Get.back(result: true);
-            },
-            child: const Text("Hide", style: TextStyle(color: Colors.red)),
-          ),
-        ],
+        ),
       ),
     );
+  }
 
-    if (confirm != true) return;
+  Future<bool> lockPhoto() async {
+    final confirm = await _askToHide('Are you sure you want to hide this file?');
+
+    if (confirm != true) {
+      return false;
+    }
+
+    if (!await MediaActionService.ensureMediaManagement()) {
+      return false;
+    }
 
     try {
-      final file = await asset.file;
+      final File? file = await currentAsset.file;
 
       if (file == null || !await file.exists()) {
-        Get.snackbar("Hide", "Unable to access this photo");
-        return;
+        AppToast.show("Unable to access this photo");
+        return false;
       }
-      final hiddenDirectory = Directory(
+
+      final Directory hiddenDirectory = Directory(
         '${(await getApplicationDocumentsDirectory()).path}/Hidden',
       );
 
@@ -650,43 +654,71 @@ class PhotoViewController extends GetxController {
         await hiddenDirectory.create(recursive: true);
       }
 
-      final fileName = file.path.split('/').last;
+      final String fileName = file.path.split(Platform.pathSeparator).last;
 
-      final hiddenFile = File('${hiddenDirectory.path}/$fileName');
+      final File hiddenFile = File('${hiddenDirectory.path}/$fileName');
 
       await file.copy(hiddenFile.path);
-      final result = await PhotoManager.editor.deleteWithIds([asset.id]);
 
-      if (result.contains(asset.id)) {
-        Get.snackbar("Hidden", "Photo hidden successfully");
+      final List<String> result = await MediaActionService.deleteIds([
+        currentAsset.id,
+      ]);
 
-        Get.back();
-      } else {
+      if (!result.contains(currentAsset.id)) {
+        if (MediaActionService.waitingForPermission) {
+          return false;
+        }
         if (await hiddenFile.exists()) {
           await hiddenFile.delete();
         }
 
-        Get.snackbar("Hide", "Unable to hide photo");
+        AppToast.show("Unable to hide photo");
+
+        return false;
       }
-    } catch (e) {
+
+      if (Get.isRegistered<PhotosController>()) {
+        final PhotosController photosController = Get.find<PhotosController>();
+
+        photosController.removeAsset(currentAsset);
+      }
+
+      albumMedia?.removeWhere((item) => item.id == currentAsset.id);
+
+      if (customAlbumName != null && Get.isRegistered<AlbumsController>()) {
+        await Get.find<AlbumsController>().removeAssetFromCustomAlbum(
+          customAlbumName!,
+          currentAsset.id,
+        );
+      }
+
+      return true;
+    } catch (e, stackTrace) {
       debugPrint("Hide Photo Error: $e");
 
-      Get.snackbar("Hide", "Something went wrong");
+      debugPrintStack(stackTrace: stackTrace);
+
+      AppToast.show("Something went wrong");
+
+      return false;
     }
   }
 
   Future<void> editPhoto() async {
     try {
       final AssetEntity selectedAsset = currentAsset;
-      final file = await selectedAsset.file;
+
+      final File? file = await selectedAsset.file;
 
       if (file == null || !await file.exists()) {
-        Get.snackbar("Edit", "Unable to access this photo");
+        AppToast.show("Unable to access this photo");
         return;
       }
+
       final PhotoEditResult? result = await Get.to<PhotoEditResult?>(
         () => PhotoEditScreen(file: file),
       );
+
       if (result == null) {
         return;
       }
@@ -696,14 +728,36 @@ class PhotoViewController extends GetxController {
       if (editedBytes.isEmpty) {
         return;
       }
+
       debugPrint("Edited image received: ${editedBytes.length} bytes");
+
+      final SettingsController settingsController =
+          Get.isRegistered<SettingsController>()
+          ? Get.find<SettingsController>()
+          : Get.put(SettingsController());
+
+      String behavior = settingsController.editedFileSavingBehaviorValue.value;
+
+      debugPrint("Edited File Saving Behavior: $behavior");
+
+      if (behavior == SettingsController.alwaysAsk) {
+        final String? selectedBehavior = await _showEditedFileSavingDialog();
+
+        if (selectedBehavior == null) {
+          return;
+        }
+
+        behavior = selectedBehavior;
+      }
+
       final AssetEntity editedAsset = await PhotoManager.editor.saveImage(
         editedBytes,
         filename: 'Edited_${DateTime.now().millisecondsSinceEpoch}.jpg',
       );
 
       debugPrint("Edited asset saved: ${editedAsset.id}");
-      if (result.replaceOriginal) {
+
+      if (behavior == SettingsController.replaceFile) {
         try {
           if (Platform.isAndroid) {
             final trashResult = await PhotoManager.editor.android.moveToTrash([
@@ -712,7 +766,7 @@ class PhotoViewController extends GetxController {
 
             debugPrint("Original moved to trash: $trashResult");
           } else {
-            await PhotoManager.editor.deleteWithIds([selectedAsset.id]);
+            await MediaActionService.deleteIds([selectedAsset.id]);
           }
         } catch (e) {
           debugPrint("Original trash/delete error: $e");
@@ -720,26 +774,53 @@ class PhotoViewController extends GetxController {
       }
 
       try {
-        final photosController = Get.find<PhotosController>();
+        final PhotosController photosController = Get.find<PhotosController>();
 
         photosController.addEditedAsset(editedAsset);
       } catch (e) {
         debugPrint("PhotosController update error: $e");
       }
+
       Get.back();
+
       Get.to(() => PhotoViewScreen(asset: editedAsset));
 
-      showToast(
-        result.replaceOriginal
-            ? "Photo replaced successfully"
-            : "Edited copy saved successfully",
-      );
+      if (behavior == SettingsController.replaceFile) {
+        showToast("Photo replaced successfully");
+      } else {
+        showToast("Edited copy saved successfully");
+      }
     } catch (e, stackTrace) {
       debugPrint("Edit Error: $e");
+
       debugPrintStack(stackTrace: stackTrace);
 
-      Get.snackbar("Edit", "Unable to save edited photo");
+      AppToast.show("Unable to save edited photo");
     }
+  }
+
+  Future<String?> _showEditedFileSavingDialog() async {
+    return await Get.dialog<String>(
+      ChromeDialog(
+        title: 'Save edited photo',
+        message: 'How do you want to save this edited photo?',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ChromeButton.ok(
+              label: 'Save copy',
+              onPressed: () => Get.back(result: SettingsController.saveCopy),
+            ),
+            const SizedBox(height: 10),
+            ChromeButton.danger(
+              label: 'Replace file',
+              onPressed: () =>
+                  Get.back(result: SettingsController.replaceFile),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void showMore(BuildContext context) {
@@ -877,13 +958,486 @@ class PhotoViewController extends GetxController {
     });
   }
 
+  Future<int> _getAndroidApiLevel() async {
+    try {
+      final String version = await PhotoManager.systemVersion();
+
+      debugPrint("PHOTO MANAGER SYSTEM VERSION: $version");
+
+      final RegExp apiRegex = RegExp(r'API[\s:]*(\d+)');
+      final Match? apiMatch = apiRegex.firstMatch(version);
+
+      if (apiMatch != null) {
+        return int.tryParse(apiMatch.group(1) ?? '') ?? 0;
+      }
+
+      final RegExp numberRegex = RegExp(r'^\d+$');
+      if (numberRegex.hasMatch(version.trim())) {
+        return int.tryParse(version.trim()) ?? 0;
+      }
+
+      final RegExp androidRegex = RegExp(
+        r'Android[\s]+(\d+)',
+        caseSensitive: false,
+      );
+
+      final Match? androidMatch = androidRegex.firstMatch(version);
+
+      if (androidMatch != null) {
+        final int androidVersion =
+            int.tryParse(androidMatch.group(1) ?? '') ?? 0;
+
+        switch (androidVersion) {
+          case 11:
+            return 30;
+          case 12:
+            return 31;
+          case 13:
+            return 33;
+          case 14:
+            return 34;
+          case 15:
+            return 35;
+          case 16:
+            return 36;
+        }
+      }
+    } catch (e) {
+      debugPrint("API LEVEL ERROR: $e");
+    }
+
+    return 0;
+  }
+
+  Future<String?> _copyToAndroidDownloads({
+    required File sourceFile,
+    required String fileName,
+    required AssetType sourceType,
+  }) async {
+    try {
+      const MethodChannel channel = MethodChannel('native_camera');
+
+      final String mimeType = _getMimeType(fileName, sourceType);
+      final dynamic response = await channel
+          .invokeMethod('copyMediaToAlbum', <String, dynamic>{
+            'sourcePath': sourceFile.path,
+            'relativePath': 'Download/',
+            'fileName': fileName,
+            'mimeType': mimeType,
+          });
+
+      if (response == null) {
+        debugPrint("DOWNLOAD COPY => Native response NULL");
+
+        return null;
+      }
+
+      final String mediaId = response.toString();
+
+      if (mediaId.trim().isEmpty) {
+        debugPrint("DOWNLOAD COPY => Media ID empty");
+
+        return null;
+      }
+
+      debugPrint("DOWNLOAD COPY => New MediaStore ID: $mediaId");
+
+      return mediaId;
+    } on PlatformException catch (e, stackTrace) {
+      return null;
+    } catch (e, stackTrace) {
+      debugPrint("DOWNLOAD COPY ERROR => $e");
+
+      debugPrintStack(stackTrace: stackTrace);
+
+      return null;
+    }
+  }
+
+  String _getMimeType(String fileName, AssetType type) {
+    final String name = fileName.toLowerCase();
+
+    if (type == AssetType.video) {
+      if (name.endsWith('.mp4')) {
+        return 'video/mp4';
+      }
+
+      if (name.endsWith('.mov')) {
+        return 'video/quicktime';
+      }
+
+      if (name.endsWith('.mkv')) {
+        return 'video/x-matroska';
+      }
+
+      if (name.endsWith('.avi')) {
+        return 'video/x-msvideo';
+      }
+
+      if (name.endsWith('.webm')) {
+        return 'video/webm';
+      }
+
+      return 'video/*';
+    }
+
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+
+    if (name.endsWith('.png')) {
+      return 'image/png';
+    }
+
+    if (name.endsWith('.webp')) {
+      return 'image/webp';
+    }
+
+    if (name.endsWith('.gif')) {
+      return 'image/gif';
+    }
+
+    if (name.endsWith('.heic')) {
+      return 'image/heic';
+    }
+
+    if (name.endsWith('.heif')) {
+      return 'image/heif';
+    }
+
+    return 'image/*';
+  }
+
+  Future<AssetEntity?> _copyAssetCrossPlatform({
+    required AssetEntity source,
+    required AssetPathEntity destinationAlbum,
+  }) async {
+    try {
+      debugPrint("========================================");
+      debugPrint("COPY START");
+      debugPrint("Original ID: ${source.id}");
+      debugPrint("Original Type: ${source.type}");
+      debugPrint("Destination: ${destinationAlbum.name}");
+      debugPrint("Destination ID: ${destinationAlbum.id}");
+
+      final File? sourceFile = await source.file;
+
+      if (sourceFile == null || !await sourceFile.exists()) {
+        debugPrint("COPY => Source file not found");
+        return null;
+      }
+
+      final String? sourceTitle = await source.titleAsync;
+
+      final String fileName =
+          (sourceTitle != null && sourceTitle.trim().isNotEmpty)
+          ? sourceTitle
+          : sourceFile.path.split(Platform.pathSeparator).last;
+
+      debugPrint("COPY SOURCE FILE => ${sourceFile.path}");
+      debugPrint("COPY FILE NAME => $fileName");
+
+      if (Platform.isIOS) {
+        debugPrint("COPY PLATFORM => iOS");
+
+        try {
+          final AssetEntity? result = await PhotoManager.editor.copyAssetToPath(
+            asset: source,
+            pathEntity: destinationAlbum,
+          );
+
+          debugPrint(
+            "COPY iOS RESULT => "
+            "${result != null ? result.id : 'NULL'}",
+          );
+
+          return result;
+        } catch (e, stackTrace) {
+          debugPrint("COPY iOS FAILED => $e");
+
+          debugPrintStack(stackTrace: stackTrace);
+
+          return null;
+        }
+      }
+
+      if (Platform.isAndroid) {
+        final int api = await _getAndroidApiLevel();
+
+        debugPrint("COPY ANDROID API => $api");
+
+        if (api > 0 && api <= 29) {
+          debugPrint("COPY METHOD => PhotoManager copyAssetToPath");
+
+          try {
+            final AssetEntity? result = await PhotoManager.editor
+                .copyAssetToPath(asset: source, pathEntity: destinationAlbum);
+
+            debugPrint(
+              "COPY LEGACY RESULT => "
+              "${result != null ? result.id : 'NULL'}",
+            );
+
+            return result;
+          } catch (e, stackTrace) {
+            debugPrint("COPY LEGACY FAILED => $e");
+
+            debugPrintStack(stackTrace: stackTrace);
+
+            return null;
+          }
+        }
+
+        if (api >= 30) {
+          final String? relativePath = await destinationAlbum.relativePathAsync;
+
+          debugPrint("COPY DESTINATION RELATIVE PATH => $relativePath");
+
+          if (relativePath == null || relativePath.trim().isEmpty) {
+            debugPrint("COPY => Destination relativePath is empty");
+
+            return null;
+          }
+
+          final String cleanRelativePath = relativePath.trim().replaceAll(
+            '\\',
+            '/',
+          );
+
+          debugPrint("COPY CLEAN RELATIVE PATH => $cleanRelativePath");
+
+          if (_isDownloadRelativePath(cleanRelativePath)) {
+            debugPrint("COPY METHOD => Native MediaStore Downloads");
+
+            try {
+              final String? newAssetId = await _copyToAndroidDownloads(
+                sourceFile: sourceFile,
+                fileName: fileName,
+                sourceType: source.type,
+              );
+
+              if (newAssetId == null || newAssetId.trim().isEmpty) {
+                debugPrint("COPY DOWNLOAD => Native copy returned NULL");
+
+                return null;
+              }
+
+              debugPrint(
+                "COPY DOWNLOAD => New MediaStore ID => "
+                "$newAssetId",
+              );
+
+              for (int attempt = 0; attempt < 5; attempt++) {
+                debugPrint(
+                  "COPY DOWNLOAD => AssetEntity.fromId attempt "
+                  "${attempt + 1}/5",
+                );
+
+                try {
+                  final AssetEntity? copiedAsset = await AssetEntity.fromId(
+                    newAssetId,
+                  );
+
+                  if (copiedAsset != null) {
+                    debugPrint("COPY DOWNLOAD => Asset FOUND by ID");
+
+                    debugPrint(
+                      "COPY DOWNLOAD => Asset ID => "
+                      "${copiedAsset.id}",
+                    );
+
+                    debugPrint(
+                      "COPY DOWNLOAD => Asset title => "
+                      "${await copiedAsset.titleAsync}",
+                    );
+
+                    debugPrint(
+                      "COPY DOWNLOAD => Asset relative path => "
+                      "${copiedAsset.relativePath}",
+                    );
+
+                    return copiedAsset;
+                  }
+
+                  debugPrint(
+                    "COPY DOWNLOAD => AssetEntity.fromId "
+                    "returned NULL",
+                  );
+                } catch (e, stackTrace) {
+                  debugPrint("COPY DOWNLOAD => fromId error => $e");
+
+                  debugPrintStack(stackTrace: stackTrace);
+                }
+
+                if (attempt < 4) {
+                  await Future.delayed(const Duration(milliseconds: 700));
+                }
+              }
+
+              debugPrint(
+                "COPY DOWNLOAD => fromId failed."
+                " Trying album filename search...",
+              );
+
+              for (int attempt = 0; attempt < 3; attempt++) {
+                debugPrint(
+                  "COPY DOWNLOAD => Filename search "
+                  "attempt ${attempt + 1}/3",
+                );
+
+                try {
+                  final List<AssetEntity> assets = await destinationAlbum
+                      .getAssetListRange(start: 0, end: 200);
+
+                  debugPrint(
+                    "COPY DOWNLOAD => Destination assets => "
+                    "${assets.length}",
+                  );
+
+                  for (final AssetEntity asset in assets) {
+                    final String? title = await asset.titleAsync;
+
+                    if (title == fileName) {
+                      debugPrint(
+                        "COPY DOWNLOAD => "
+                        "Found by filename => $title",
+                      );
+
+                      return asset;
+                    }
+                  }
+
+                  final String lowerFileName = fileName.toLowerCase();
+
+                  for (final AssetEntity asset in assets) {
+                    final String? title = await asset.titleAsync;
+
+                    if (title != null && title.toLowerCase() == lowerFileName) {
+                      debugPrint(
+                        "COPY DOWNLOAD => "
+                        "Found by case-insensitive filename",
+                      );
+
+                      return asset;
+                    }
+                  }
+                } catch (e, stackTrace) {
+                  debugPrint(
+                    "COPY DOWNLOAD => "
+                    "Filename search error => $e",
+                  );
+
+                  debugPrintStack(stackTrace: stackTrace);
+                }
+
+                if (attempt < 2) {
+                  await Future.delayed(const Duration(milliseconds: 700));
+                }
+              }
+
+              debugPrint(
+                "COPY DOWNLOAD => MediaStore copy completed "
+                "but AssetEntity could not be resolved",
+              );
+
+              return null;
+            } catch (e, stackTrace) {
+              debugPrint("COPY DOWNLOAD FAILED => $e");
+              debugPrintStack(stackTrace: stackTrace);
+              return null;
+            }
+          }
+
+          if (_isSupportedMediaStoreRelativePath(cleanRelativePath)) {
+            debugPrint("COPY METHOD => MediaStore relativePath");
+
+            try {
+              if (source.type == AssetType.video) {
+                debugPrint("COPY => Saving video to destination");
+
+                final AssetEntity result = await PhotoManager.editor.saveVideo(
+                  sourceFile,
+                  title: fileName,
+                  relativePath: cleanRelativePath,
+                );
+                debugPrint("COPY VIDEO RESULT => ${result.id}");
+                return result;
+              }
+
+              debugPrint("COPY => Saving image to destination");
+
+              final AssetEntity result = await PhotoManager.editor
+                  .saveImageWithPath(
+                    sourceFile.path,
+                    title: fileName,
+                    relativePath: cleanRelativePath,
+                  );
+              debugPrint("COPY IMAGE RESULT => ${result.id}");
+              return result;
+            } catch (e, stackTrace) {
+              debugPrint("COPY MEDIASTORE FAILED => $e");
+              debugPrintStack(stackTrace: stackTrace);
+              return null;
+            }
+          }
+
+          debugPrint(
+            "COPY => Unsupported Android relative path: "
+            "$cleanRelativePath",
+          );
+
+          return null;
+        }
+
+        debugPrint("COPY => Unknown Android API level: $api");
+
+        return null;
+      }
+
+      debugPrint("COPY => Unsupported platform");
+
+      return null;
+    } catch (e, stackTrace) {
+      debugPrint("COPY FINAL FAILED => $e");
+
+      debugPrintStack(stackTrace: stackTrace);
+
+      return null;
+    }
+  }
+
+  bool _isDownloadRelativePath(String path) {
+    final String normalized = path.trim().replaceAll('\\', '/').toLowerCase();
+
+    return normalized == 'download' ||
+        normalized == 'download/' ||
+        normalized.startsWith('download/');
+  }
+
+  bool _isSupportedMediaStoreRelativePath(String path) {
+    final String normalized = path.trim().replaceAll('\\', '/').toLowerCase();
+
+    return normalized.startsWith('pictures/') ||
+        normalized == 'pictures' ||
+        normalized.startsWith('dcim/') ||
+        normalized == 'dcim';
+  }
+
   Future<void> copyPhoto() async {
     if (isCopyMoveLoading.value) {
       return;
     }
-
     try {
       final AssetEntity current = currentAsset;
+      final File? originalFile = await current.file;
+
+      if (originalFile == null || !await originalFile.exists()) {
+        AppToast.show("Unable to access original file");
+
+        return;
+      }
+
+      final DateTime oldLastModified = await originalFile.lastModified();
 
       final AssetPathEntity? destinationAlbum = await Get.to<AssetPathEntity>(
         () => CopyMoveAlbumScreen(asset: current, action: CopyMoveAction.copy),
@@ -894,12 +1448,8 @@ class PhotoViewController extends GetxController {
       }
 
       if (destinationAlbum.isAll) {
-        Get.snackbar(
-          "Copy",
-          "Please select a valid album",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Please select a valid album");
+
         return;
       }
 
@@ -908,28 +1458,64 @@ class PhotoViewController extends GetxController {
       debugPrint("================================");
       debugPrint("COPY START");
       debugPrint("Original ID: ${current.id}");
+      debugPrint("Original File: ${originalFile.path}");
+      debugPrint("Original Type: ${current.type}");
       debugPrint("Destination: ${destinationAlbum.name}");
       debugPrint("Destination ID: ${destinationAlbum.id}");
       debugPrint("================================");
 
-      final AssetEntity? copiedAsset = await PhotoManager.editor
-          .copyAssetToPath(asset: current, pathEntity: destinationAlbum);
+      final AssetEntity? copiedAsset = await _copyAssetCrossPlatform(
+        source: current,
+        destinationAlbum: destinationAlbum,
+      );
 
       if (copiedAsset == null) {
-        Get.snackbar(
-          "Copy",
-          "Unable to copy photo",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
+        debugPrint("COPY => FINAL RESULT: FAILED");
+
+        AppToast.show(
+          "Unable to copy photo to ${destinationAlbum.name}",
+          long: true,
         );
+
         return;
       }
 
+      if (FileOperationService.keepLastModified) {
+        try {
+          final File? copiedFile = await copiedAsset.file;
+
+          if (copiedFile != null && await copiedFile.exists()) {
+            await copiedFile.setLastModified(oldLastModified);
+
+            debugPrint("COPY => Old last modified restored");
+          }
+        } catch (e) {
+          debugPrint("COPY => Failed to restore last modified: $e");
+        }
+      }
+
+      try {
+        await PhotoManager.clearFileCache();
+      } catch (e) {
+        debugPrint("COPY => Cache clear error: $e");
+      }
+
+      debugPrint("================================");
       debugPrint("COPY SUCCESS");
       debugPrint("Original Asset ID: ${current.id}");
       debugPrint("Copied Asset ID: ${copiedAsset.id}");
+      debugPrint("Destination: ${destinationAlbum.name}");
+      debugPrint("================================");
+
       if (Get.isRegistered<AlbumsController>()) {
         await Get.find<AlbumsController>().loadAlbums();
+      }
+
+      if (Get.isRegistered<CleanerController>()) {
+        await Get.find<CleanerController>().rememberCopiedPhoto(
+          current,
+          copiedAsset,
+        );
       }
 
       showToast("Copied to ${destinationAlbum.name}");
@@ -940,12 +1526,7 @@ class PhotoViewController extends GetxController {
       debugPrintStack(stackTrace: stackTrace);
       debugPrint("================================");
 
-      Get.snackbar(
-        "Copy",
-        "Unable to copy photo",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+      AppToast.show("Unable to copy photo");
     } finally {
       isCopyMoveLoading.value = false;
     }
@@ -958,6 +1539,16 @@ class PhotoViewController extends GetxController {
 
     try {
       final AssetEntity current = currentAsset;
+
+      final File? originalFile = await current.file;
+
+      if (originalFile == null || !await originalFile.exists()) {
+        AppToast.show("Unable to access original file");
+        return;
+      }
+
+      final DateTime oldLastModified = await originalFile.lastModified();
+
       final AssetPathEntity? destinationAlbum = await Get.to<AssetPathEntity>(
         () => CopyMoveAlbumScreen(asset: current, action: CopyMoveAction.move),
       );
@@ -967,12 +1558,7 @@ class PhotoViewController extends GetxController {
       }
 
       if (destinationAlbum.isAll) {
-        Get.snackbar(
-          "Move",
-          "Please select a valid album",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Please select a valid album");
         return;
       }
 
@@ -981,43 +1567,156 @@ class PhotoViewController extends GetxController {
       debugPrint("================================");
       debugPrint("MOVE START");
       debugPrint("Original ID: ${current.id}");
+      debugPrint("Original Type: ${current.type}");
       debugPrint("Destination: ${destinationAlbum.name}");
       debugPrint("Destination ID: ${destinationAlbum.id}");
       debugPrint("================================");
+
       if (Platform.isAndroid) {
-        await PhotoManager.editor.android.moveAssetToAnother(
-          entity: current,
-          target: destinationAlbum,
-        );
+        final int api = await _getAndroidApiLevel();
 
-        debugPrint("ANDROID MOVE SUCCESS");
-      } else if (Platform.isIOS) {
-        final AssetEntity? movedAsset = await PhotoManager.editor
-            .copyAssetToPath(asset: current, pathEntity: destinationAlbum);
+        if (api >= 30) {
+          final String? relativePath = await destinationAlbum.relativePathAsync;
 
-        if (movedAsset == null) {
-          Get.snackbar(
-            "Move",
-            "Unable to add photo to destination album",
-            snackPosition: SnackPosition.BOTTOM,
-            margin: const EdgeInsets.all(12),
+          debugPrint("MOVE DESTINATION RELATIVE PATH => $relativePath");
+
+          if (relativePath == null || relativePath.trim().isEmpty) {
+            AppToast.show("Unable to determine destination folder");
+
+            return;
+          }
+
+          final String cleanRelativePath = relativePath.trim().replaceAll(
+            '\\',
+            '/',
           );
-          return;
+
+          debugPrint(
+            "MOVE CLEAN RELATIVE PATH => "
+            "$cleanRelativePath",
+          );
+
+          try {
+            const MethodChannel channel = MethodChannel('native_camera');
+            final dynamic response = await channel
+                .invokeMethod('moveMediaToAlbum', <String, dynamic>{
+                  'assetId': current.id,
+                  'relativePath': cleanRelativePath,
+                  'isVideo': current.type == AssetType.video,
+                });
+
+            if (response == null) {
+              debugPrint("MOVE => Native MediaStore returned NULL");
+
+              AppToast.show("Unable to move file");
+
+              return;
+            }
+
+            debugPrint("MOVE => MediaStore move SUCCESS => $response");
+
+            if (FileOperationService.keepLastModified) {
+              try {
+                final File? movedFile = await current.file;
+
+                if (movedFile != null && await movedFile.exists()) {
+                  await movedFile.setLastModified(oldLastModified);
+
+                  debugPrint("MOVE => Old last modified restored");
+                }
+              } catch (e) {
+                debugPrint("MOVE => Last modified error: $e");
+              }
+            }
+
+            try {
+              await PhotoManager.clearFileCache();
+            } catch (e) {
+              debugPrint("MOVE => Cache clear error: $e");
+            }
+
+            if (Get.isRegistered<AlbumsController>()) {
+              await Get.find<AlbumsController>().loadAlbums();
+            }
+
+            if (Get.isRegistered<PhotosController>()) {
+              final PhotosController photosController =
+                  Get.find<PhotosController>();
+
+              photosController.allMedia.refresh();
+              photosController.filteredMedia.refresh();
+            }
+
+            if (Get.isRegistered<PlacesController>()) {
+              final PlacesController placesController =
+                  Get.find<PlacesController>();
+
+              placesController.places.refresh();
+            }
+
+            debugPrint("================================");
+            debugPrint("MOVE SUCCESS");
+            debugPrint("Asset ID: ${current.id}");
+            debugPrint("Destination: ${destinationAlbum.name}");
+            debugPrint("================================");
+
+            showToast("Moved to ${destinationAlbum.name}");
+
+            Get.back();
+
+            return;
+          } on PlatformException catch (e) {
+            debugPrint("MOVE PLATFORM ERROR => ${e.code}");
+            debugPrint("MOVE MESSAGE => ${e.message}");
+
+            if (e.code == "MEDIA_MANAGEMENT_DENIED") {
+              AppToast.show("Media management permission was not granted.");
+            } else {
+              AppToast.show(e.message ?? "Unable to move media.");
+            }
+
+            return;
+          }
         }
-        debugPrint("IOS DESTINATION ADD SUCCESS");
-        if (albumMedia != null) {}
-      } else {
-        Get.snackbar(
-          "Move",
-          "Unsupported platform",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+      }
+
+      final AssetEntity? copiedAsset = await _copyAssetCrossPlatform(
+        source: current,
+        destinationAlbum: destinationAlbum,
+      );
+
+      if (copiedAsset == null) {
+        AppToast.show("Unable to copy photo to ${destinationAlbum.name}");
+
         return;
       }
+
+      if (FileOperationService.keepLastModified) {
+        try {
+          final File? copiedFile = await copiedAsset.file;
+
+          if (copiedFile != null && await copiedFile.exists()) {
+            await copiedFile.setLastModified(oldLastModified);
+          }
+        } catch (e) {
+          debugPrint("MOVE => Last modified error: $e");
+        }
+      }
+
+      final List<String> deletedIds = await MediaActionService.deleteIds(
+        <String>[current.id],
+      );
+
+      if (!deletedIds.contains(current.id)) {
+        AppToast.show("Photo copied, but original could not be removed");
+
+        return;
+      }
+
       if (Get.isRegistered<AlbumsController>()) {
         await Get.find<AlbumsController>().loadAlbums();
       }
+
       if (Get.isRegistered<PhotosController>()) {
         final PhotosController photosController = Get.find<PhotosController>();
 
@@ -1031,24 +1730,437 @@ class PhotoViewController extends GetxController {
         photosController.filteredMedia.refresh();
       }
 
+      if (Get.isRegistered<PlacesController>()) {
+        final PlacesController placesController = Get.find<PlacesController>();
+
+        for (final PlaceGroup place in placesController.places) {
+          place.assets.removeWhere((asset) => asset.id == current.id);
+        }
+
+        placesController.places.refresh();
+      }
+
       showToast("Moved to ${destinationAlbum.name}");
+
       Get.back();
     } catch (e, stackTrace) {
       debugPrint("================================");
       debugPrint("MOVE ERROR");
       debugPrint("$e");
+
       debugPrintStack(stackTrace: stackTrace);
+
       debugPrint("================================");
 
-      Get.snackbar(
-        "Move",
-        "Unable to move photo",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+      AppToast.show("Unable to move photo");
     } finally {
       isCopyMoveLoading.value = false;
     }
+  }
+
+  Future<void> shareAssets(List<AssetEntity> assets) async {
+    if (assets.isEmpty) {
+      return;
+    }
+
+    try {
+      final List<XFile> files = [];
+
+      for (final AssetEntity asset in assets) {
+        final File? file = await asset.file;
+
+        if (file != null && await file.exists()) {
+          files.add(XFile(file.path));
+        }
+      }
+
+      if (files.isEmpty) {
+        AppToast.show("Unable to access selected photos");
+        return;
+      }
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: files,
+          title: files.length > 1 ? "Share Photos" : "Share Photo",
+        ),
+      );
+    } catch (e) {
+      debugPrint("Batch Share Error: $e");
+      AppToast.show("Unable to share selected photos");
+    }
+  }
+
+  Future<List<String>> hideAssets(List<AssetEntity> assets) async {
+    if (assets.isEmpty) {
+      return <String>[];
+    }
+
+    final confirm = await _askToHide(
+      assets.length > 1
+          ? 'Are you sure you want to hide ${assets.length} selected items?'
+          : 'Are you sure you want to hide this file?',
+    );
+
+    if (confirm != true) {
+      return <String>[];
+    }
+
+    if (!await MediaActionService.ensureMediaManagement()) {
+      return <String>[];
+    }
+
+    final List<String> hiddenIds = [];
+
+    for (final AssetEntity asset in assets) {
+      try {
+        final File? file = await asset.file;
+
+        if (file == null || !await file.exists()) {
+          continue;
+        }
+
+        final Directory hiddenDirectory = Directory(
+          '${(await getApplicationDocumentsDirectory()).path}/Hidden',
+        );
+
+        if (!await hiddenDirectory.exists()) {
+          await hiddenDirectory.create(recursive: true);
+        }
+
+        final String fileName = file.path.split(Platform.pathSeparator).last;
+
+        final File hiddenFile = File('${hiddenDirectory.path}/$fileName');
+
+        await file.copy(hiddenFile.path);
+
+        final List<String> result = await MediaActionService.deleteIds([
+          asset.id,
+        ]);
+
+        if (!result.contains(asset.id)) {
+          if (await hiddenFile.exists()) {
+            await hiddenFile.delete();
+          }
+          continue;
+        }
+
+        hiddenIds.add(asset.id);
+
+        if (Get.isRegistered<PhotosController>()) {
+          Get.find<PhotosController>().removeAsset(asset);
+        }
+
+        albumMedia?.removeWhere((item) => item.id == asset.id);
+
+        if (customAlbumName != null && Get.isRegistered<AlbumsController>()) {
+          await Get.find<AlbumsController>().removeAssetFromCustomAlbum(
+            customAlbumName!,
+            asset.id,
+          );
+        }
+      } catch (e, stackTrace) {
+        debugPrint("Batch Hide Photo Error: $e");
+        debugPrintStack(stackTrace: stackTrace);
+      }
+    }
+
+    if (hiddenIds.isEmpty) {
+      AppToast.show("Unable to hide selected photos");
+    } else {
+      showToast(
+        hiddenIds.length == 1
+            ? "Photo hidden"
+            : "${hiddenIds.length} photos hidden",
+      );
+    }
+
+    return hiddenIds;
+  }
+
+  Future<void> copyAssets(List<AssetEntity> assets) async {
+    if (assets.isEmpty || isCopyMoveLoading.value) {
+      return;
+    }
+
+    try {
+      final AssetPathEntity? destinationAlbum = await Get.to<AssetPathEntity>(
+        () => CopyMoveAlbumScreen(
+          asset: assets.first,
+          action: CopyMoveAction.copy,
+        ),
+      );
+
+      if (destinationAlbum == null) {
+        return;
+      }
+
+      if (destinationAlbum.isAll) {
+        AppToast.show("Please select a valid album");
+        return;
+      }
+
+      isCopyMoveLoading.value = true;
+
+      int successCount = 0;
+
+      for (final AssetEntity asset in assets) {
+        try {
+          final File? originalFile = await asset.file;
+
+          if (originalFile == null || !await originalFile.exists()) {
+            continue;
+          }
+
+          final DateTime oldLastModified = await originalFile.lastModified();
+
+          final AssetEntity? copiedAsset = await _copyAssetCrossPlatform(
+            source: asset,
+            destinationAlbum: destinationAlbum,
+          );
+
+          if (copiedAsset == null) {
+            continue;
+          }
+
+          if (FileOperationService.keepLastModified) {
+            try {
+              final File? copiedFile = await copiedAsset.file;
+
+              if (copiedFile != null && await copiedFile.exists()) {
+                await copiedFile.setLastModified(oldLastModified);
+              }
+            } catch (e) {
+              debugPrint("Batch Copy => Failed to restore last modified: $e");
+            }
+          }
+
+          successCount++;
+          if (Get.isRegistered<CleanerController>()) {
+            await Get.find<CleanerController>().rememberCopiedPhoto(
+              asset,
+              copiedAsset,
+            );
+          }
+        } catch (e) {
+          debugPrint("Batch Copy Error for ${asset.id}: $e");
+        }
+      }
+
+      try {
+        await PhotoManager.clearFileCache();
+      } catch (e) {
+        debugPrint("Batch Copy => Cache clear error: $e");
+      }
+
+      if (Get.isRegistered<AlbumsController>()) {
+        await Get.find<AlbumsController>().loadAlbums();
+      }
+
+      if (successCount > 0) {
+        showToast(
+          successCount == 1
+              ? "Copied to ${destinationAlbum.name}"
+              : "$successCount items copied to ${destinationAlbum.name}",
+        );
+      } else {
+        AppToast.show(
+          "Unable to copy selected photos to ${destinationAlbum.name}",
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint("Batch Copy Error: $e");
+      debugPrintStack(stackTrace: stackTrace);
+
+      AppToast.show("Unable to copy selected photos");
+    } finally {
+      isCopyMoveLoading.value = false;
+    }
+  }
+
+  Future<List<String>> moveAssets(List<AssetEntity> assets) async {
+    if (assets.isEmpty || isCopyMoveLoading.value) {
+      return <String>[];
+    }
+
+    final List<String> movedSourceIds = [];
+
+    try {
+      final AssetPathEntity? destinationAlbum = await Get.to<AssetPathEntity>(
+        () => CopyMoveAlbumScreen(
+          asset: assets.first,
+          action: CopyMoveAction.move,
+        ),
+      );
+
+      if (destinationAlbum == null) {
+        return <String>[];
+      }
+
+      if (destinationAlbum.isAll) {
+        AppToast.show("Please select a valid album");
+        return <String>[];
+      }
+
+      isCopyMoveLoading.value = true;
+
+      String? relativePath;
+      int androidApi = 0;
+
+      if (Platform.isAndroid) {
+        androidApi = await _getAndroidApiLevel();
+
+        if (androidApi >= 30) {
+          final String? rawRelativePath =
+              await destinationAlbum.relativePathAsync;
+
+          relativePath = rawRelativePath?.trim().replaceAll('\\', '/');
+        }
+      }
+
+      for (final AssetEntity asset in assets) {
+        try {
+          final File? originalFile = await asset.file;
+
+          if (originalFile == null || !await originalFile.exists()) {
+            continue;
+          }
+
+          final DateTime oldLastModified = await originalFile.lastModified();
+
+          bool movedThisAsset = false;
+
+          if (Platform.isAndroid &&
+              androidApi >= 30 &&
+              relativePath != null &&
+              relativePath.isNotEmpty) {
+            try {
+              const MethodChannel channel = MethodChannel('native_camera');
+
+              final dynamic response = await channel
+                  .invokeMethod('moveMediaToAlbum', <String, dynamic>{
+                    'assetId': asset.id,
+                    'relativePath': relativePath,
+                    'isVideo': asset.type == AssetType.video,
+                  });
+
+              if (response != null) {
+                if (FileOperationService.keepLastModified) {
+                  try {
+                    final File? movedFile = await asset.file;
+
+                    if (movedFile != null && await movedFile.exists()) {
+                      await movedFile.setLastModified(oldLastModified);
+                    }
+                  } catch (e) {
+                    debugPrint("Batch Move => Last modified error: $e");
+                  }
+                }
+
+                movedThisAsset = true;
+              }
+            } on PlatformException catch (e) {
+              debugPrint(
+                "Batch Move Platform Error for ${asset.id}: ${e.code}",
+              );
+            }
+          }
+
+          if (!movedThisAsset) {
+            final AssetEntity? copiedAsset = await _copyAssetCrossPlatform(
+              source: asset,
+              destinationAlbum: destinationAlbum,
+            );
+
+            if (copiedAsset == null) {
+              continue;
+            }
+
+            if (FileOperationService.keepLastModified) {
+              try {
+                final File? copiedFile = await copiedAsset.file;
+
+                if (copiedFile != null && await copiedFile.exists()) {
+                  await copiedFile.setLastModified(oldLastModified);
+                }
+              } catch (e) {
+                debugPrint("Batch Move => Last modified error: $e");
+              }
+            }
+
+            final List<String> deletedIds = await PhotoManager.editor
+                .deleteWithIds(<String>[asset.id]);
+
+            if (!deletedIds.contains(asset.id)) {
+              continue;
+            }
+
+            movedThisAsset = true;
+          }
+
+          if (movedThisAsset) {
+            movedSourceIds.add(asset.id);
+          }
+        } catch (e) {
+          debugPrint("Batch Move Error for ${asset.id}: $e");
+        }
+      }
+
+      try {
+        await PhotoManager.clearFileCache();
+      } catch (e) {
+        debugPrint("Batch Move => Cache clear error: $e");
+      }
+
+      if (Get.isRegistered<AlbumsController>()) {
+        await Get.find<AlbumsController>().loadAlbums();
+      }
+
+      if (Get.isRegistered<PhotosController>()) {
+        final PhotosController photosController = Get.find<PhotosController>();
+
+        photosController.allMedia.removeWhere(
+          (item) => movedSourceIds.contains(item.id),
+        );
+        photosController.filteredMedia.removeWhere(
+          (item) => movedSourceIds.contains(item.id),
+        );
+
+        photosController.allMedia.refresh();
+        photosController.filteredMedia.refresh();
+      }
+
+      if (Get.isRegistered<PlacesController>()) {
+        final PlacesController placesController = Get.find<PlacesController>();
+
+        for (final PlaceGroup place in placesController.places) {
+          place.assets.removeWhere((a) => movedSourceIds.contains(a.id));
+        }
+
+        placesController.places.refresh();
+      }
+
+      if (movedSourceIds.isNotEmpty) {
+        showToast(
+          movedSourceIds.length == 1
+              ? "Moved to ${destinationAlbum.name}"
+              : "${movedSourceIds.length} items moved to ${destinationAlbum.name}",
+        );
+      } else {
+        AppToast.show(
+          "Unable to move selected photos to ${destinationAlbum.name}",
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint("Batch Move Error: $e");
+      debugPrintStack(stackTrace: stackTrace);
+
+      AppToast.show("Unable to move selected photos");
+    } finally {
+      isCopyMoveLoading.value = false;
+    }
+
+    return movedSourceIds;
   }
 
   Future<void> setAsWallpaper() async {
@@ -1056,22 +2168,14 @@ class PhotoViewController extends GetxController {
       final current = currentAsset;
 
       if (current.type == AssetType.video) {
-        Get.snackbar(
-          "Wallpaper",
-          "Video wallpaper is not supported",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Video wallpaper is not supported");
         return;
       }
 
       final file = await current.file;
 
       if (file == null || !await file.exists()) {
-        Get.snackbar(
-          "Wallpaper",
-          "Unable to access this photo",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Unable to access this photo");
         return;
       }
 
@@ -1080,11 +2184,7 @@ class PhotoViewController extends GetxController {
       debugPrint("Wallpaper Screen Error: $e");
       debugPrintStack(stackTrace: stackTrace);
 
-      Get.snackbar(
-        "Wallpaper",
-        "Unable to open wallpaper screen",
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show("Unable to open wallpaper screen");
     }
   }
 
@@ -1095,13 +2195,11 @@ class PhotoViewController extends GetxController {
       final File? file = await current.file;
 
       if (file == null || !await file.exists()) {
-        Get.snackbar(
-          "Rename",
-          "Unable to access this photo",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Unable to access this photo");
         return;
       }
+
+      final DateTime oldLastModified = await file.lastModified();
 
       final String oldFileName = file.path.split('/').last;
 
@@ -1109,7 +2207,7 @@ class PhotoViewController extends GetxController {
 
       final String extension = dotIndex != -1
           ? oldFileName.substring(dotIndex)
-          : '';
+          : '.jpg';
 
       final String oldName = dotIndex != -1
           ? oldFileName.substring(0, dotIndex)
@@ -1124,12 +2222,11 @@ class PhotoViewController extends GetxController {
       }
 
       String newName = result.trim();
-      if (extension.isNotEmpty &&
-          !newName.toLowerCase().endsWith(extension.toLowerCase())) {
-        newName = '$newName$extension';
-      }
-      if (newName == oldFileName) {
-        return;
+
+      final int newDotIndex = newName.lastIndexOf('.');
+
+      if (newDotIndex != -1) {
+        newName = newName.substring(0, newDotIndex);
       }
 
       if (newName.contains('/') ||
@@ -1141,52 +2238,186 @@ class PhotoViewController extends GetxController {
           newName.contains('<') ||
           newName.contains('>') ||
           newName.contains('|')) {
-        Get.snackbar(
-          "Rename",
-          "Invalid file name",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Invalid file name");
         return;
       }
-      final String newPath = '${file.parent.path}/$newName';
 
-      if (await File(newPath).exists()) {
-        Get.snackbar(
-          "Rename",
-          "A file with this name already exists",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+      if (newName.isEmpty) {
+        AppToast.show("Please enter a valid file name");
         return;
       }
-      final File renamedFile = await file.rename(newPath);
-      _renamedFile = renamedFile;
-      _renamedAsset = current;
-      debugPrint("RENAME SUCCESS");
-      debugPrint("Asset ID  : ${current.id}");
-      debugPrint("Old Name  : $oldFileName");
+
+      final String finalFileName = '$newName$extension';
+
+      if (finalFileName == oldFileName) {
+        return;
+      }
+
+      final Uint8List bytes = await file.readAsBytes();
+
+      if (bytes.isEmpty) {
+        AppToast.show("Unable to read photo");
+        return;
+      }
+
+      debugPrint("================================");
+      debugPrint("RENAME START");
+      debugPrint("Old Name : $oldFileName");
+      debugPrint("New Name : $finalFileName");
+      debugPrint("Old Asset ID : ${current.id}");
+      debugPrint("Old Last Modified : $oldLastModified");
+      debugPrint("================================");
+
+      final AssetEntity newAsset = await PhotoManager.editor.saveImage(
+        bytes,
+        filename: finalFileName,
+      );
+
+      debugPrint("NEW ASSET CREATED");
+      debugPrint("New Asset ID : ${newAsset.id}");
+
+      final List<String> deletedIds = await MediaActionService.deleteIds(
+        <String>[current.id],
+      );
+
+      if (!deletedIds.contains(current.id)) {
+        debugPrint("RENAME => OLD FILE DELETE FAILED");
+
+        AppToast.show(
+          "New file created, but old file could not be removed",
+          long: true,
+        );
+
+        return;
+      }
+
+      _renamedAsset = newAsset;
+
+      final File? renamedFile = await newAsset.file;
+
+      if (renamedFile != null && await renamedFile.exists()) {
+        _renamedFile = renamedFile;
+
+        if (FileOperationService.keepLastModified) {
+          try {
+            await renamedFile.setLastModified(oldLastModified);
+
+            debugPrint("RENAME => Old last modified restored");
+
+            debugPrint("Last Modified : $oldLastModified");
+          } catch (e) {
+            debugPrint("RENAME => Failed to restore last modified: $e");
+          }
+        }
+      }
+
       await PhotoManager.clearFileCache();
 
-      if (Get.isRegistered<AlbumsController>()) {
-        await Get.find<AlbumsController>().loadAlbums();
+      if (Get.isRegistered<PhotosController>()) {
+        final PhotosController photosController = Get.find<PhotosController>();
+
+        try {
+          photosController.allMedia.removeWhere(
+            (item) => item.id == current.id,
+          );
+
+          photosController.filteredMedia.removeWhere(
+            (item) => item.id == current.id,
+          );
+
+          photosController.allMedia.add(newAsset);
+
+          photosController.filteredMedia.add(newAsset);
+
+          photosController.allMedia.refresh();
+          photosController.filteredMedia.refresh();
+        } catch (e) {
+          debugPrint("PhotosController Rename Update Error => $e");
+        }
       }
-      Get.snackbar(
-        "Rename",
-        "Photo renamed successfully",
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: 2),
-      );
-    } catch (e, stackTrace) {
+
+      if (Get.isRegistered<AlbumPhotosController>(tag: current.id)) {
+        try {
+          final AlbumPhotosController albumController =
+              Get.find<AlbumPhotosController>(tag: current.id);
+
+          final int index = albumController.media.indexWhere(
+            (asset) => asset.id == current.id,
+          );
+
+          if (index != -1) {
+            albumController.media[index] = newAsset;
+            albumController.media.refresh();
+
+            debugPrint("ALBUM MEDIA UPDATED => OLD ASSET REPLACED");
+          }
+        } catch (e) {
+          debugPrint("AlbumPhotosController Rename Update Error => $e");
+        }
+      }
+
+      try {
+        final controllers = Get.find<AlbumPhotosController>();
+
+        final int index = controllers.media.indexWhere(
+          (asset) => asset.id == current.id,
+        );
+
+        if (index != -1) {
+          controllers.media[index] = newAsset;
+          controllers.media.refresh();
+
+          debugPrint("ACTIVE ALBUM CONTROLLER UPDATED => $newAsset");
+        }
+      } catch (e) {
+        debugPrint("Active Album Controller Not Found => $e");
+      }
+
+      if (Get.isRegistered<AlbumsController>()) {
+        try {
+          await Get.find<AlbumsController>().loadAlbums();
+
+          debugPrint("ALBUMS CONTROLLER REFRESHED");
+        } catch (e) {
+          debugPrint("Albums Rename Refresh Error => $e");
+        }
+      }
+
+      if (Get.isRegistered<PlacesController>()) {
+        try {
+          final PlacesController placesController =
+              Get.find<PlacesController>();
+
+          for (final PlaceGroup place in placesController.places) {
+            final int index = place.assets.indexWhere(
+              (asset) => asset.id == current.id,
+            );
+
+            if (index != -1) {
+              place.assets[index] = newAsset;
+            }
+          }
+
+          placesController.places.refresh();
+        } catch (e) {
+          debugPrint("Places Rename Update Error => $e");
+        }
+      }
+
       debugPrint("================================");
-      debugPrint("RENAME ERROR");
-      debugPrint("$e");
-      debugPrintStack(stackTrace: stackTrace);
+      debugPrint("RENAME SUCCESS");
+      debugPrint("New File : $finalFileName");
+      debugPrint("New Asset ID : ${newAsset.id}");
       debugPrint("================================");
 
-      Get.snackbar(
-        "Rename",
-        "Unable to rename photo",
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show("Photo renamed successfully");
+    } catch (e, stackTrace) {
+      debugPrint("RENAME ERROR");
+      debugPrint("$e");
+
+      debugPrintStack(stackTrace: stackTrace);
+
+      AppToast.show("Unable to rename photo");
     }
   }
 
@@ -1197,26 +2428,17 @@ class PhotoViewController extends GetxController {
       final File? file = await current.file;
 
       if (file == null || !await file.exists()) {
-        Get.snackbar(
-          "Resize",
-          "Image file not found",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Image file not found");
         return;
       }
 
-      // =========================================================
-      // ORIGINAL IMAGE
-      // =========================================================
-
       final Uint8List originalBytes = await file.readAsBytes();
 
-      final ui.Codec originalCodec =
-      await ui.instantiateImageCodec(originalBytes);
+      final ui.Codec originalCodec = await ui.instantiateImageCodec(
+        originalBytes,
+      );
 
-      final ui.FrameInfo originalFrame =
-      await originalCodec.getNextFrame();
+      final ui.FrameInfo originalFrame = await originalCodec.getNextFrame();
 
       final ui.Image originalImage = originalFrame.image;
 
@@ -1224,18 +2446,9 @@ class PhotoViewController extends GetxController {
       final int originalHeight = originalImage.height;
 
       if (originalWidth <= 0 || originalHeight <= 0) {
-        Get.snackbar(
-          "Resize",
-          "Invalid image resolution",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Invalid image resolution");
         return;
       }
-
-      // =========================================================
-      // OLD FILE NAME
-      // =========================================================
 
       final String oldFileName = file.path.split('/').last;
 
@@ -1244,10 +2457,6 @@ class PhotoViewController extends GetxController {
       final String oldName = dotIndex != -1
           ? oldFileName.substring(0, dotIndex)
           : oldFileName;
-
-      // =========================================================
-      // RESIZE DIALOG
-      // =========================================================
 
       final ResizeResult? result = await Get.dialog<ResizeResult>(
         _ResizeDialog(
@@ -1263,18 +2472,9 @@ class PhotoViewController extends GetxController {
       }
 
       if (result.name.trim().isEmpty) {
-        Get.snackbar(
-          "Resize",
-          "Please enter image name",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Please enter image name");
         return;
       }
-
-      // =========================================================
-      // ACTUAL RESIZE
-      // =========================================================
 
       final ui.Codec resizedCodec = await ui.instantiateImageCodec(
         originalBytes,
@@ -1282,102 +2482,61 @@ class PhotoViewController extends GetxController {
         targetHeight: result.height,
       );
 
-      final ui.FrameInfo resizedFrame =
-      await resizedCodec.getNextFrame();
+      final ui.FrameInfo resizedFrame = await resizedCodec.getNextFrame();
 
       final ui.Image resizedImage = resizedFrame.image;
-
-      // =========================================================
-      // LOSSLESS IMAGE OUTPUT
-      // PNG = NO JPEG QUALITY COMPRESSION
-      // =========================================================
 
       final ByteData? resizedData = await resizedImage.toByteData(
         format: ui.ImageByteFormat.png,
       );
 
       if (resizedData == null) {
-        Get.snackbar(
-          "Resize",
-          "Unable to process image",
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.all(12),
-        );
+        AppToast.show("Unable to process image");
         return;
       }
 
-      final Uint8List resizedBytes =
-      resizedData.buffer.asUint8List();
-
-      // =========================================================
-      // FILE NAME
-      // =========================================================
+      final Uint8List resizedBytes = resizedData.buffer.asUint8List();
 
       String fileName = result.name.trim();
 
-      fileName = fileName.replaceAll(
-        RegExp(r'[\/\\:*?"<>|]'),
-        '_',
-      );
+      fileName = fileName.replaceAll(RegExp(r'[\/\\:*?"<>|]'), '_');
 
       fileName = fileName.replaceFirst(
-        RegExp(
-          r'\.(png|jpg|jpeg|webp)$',
-          caseSensitive: false,
-        ),
+        RegExp(r'\.(png|jpg|jpeg|webp)$', caseSensitive: false),
         '',
       );
 
       if (fileName.isEmpty) {
-        fileName =
-        'Resized_${DateTime.now().millisecondsSinceEpoch}';
+        fileName = 'Resized_${DateTime.now().millisecondsSinceEpoch}';
       }
 
-      final AssetEntity resizedAsset =
-      await PhotoManager.editor.saveImage(
+      final AssetEntity resizedAsset = await PhotoManager.editor.saveImage(
         resizedBytes,
         filename: '$fileName.png',
       );
-
-      // =========================================================
-      // VERIFY WIDTH / HEIGHT
-      // =========================================================
 
       final File? newFile = await resizedAsset.file;
 
       if (newFile != null && await newFile.exists()) {
         final Uint8List newBytes = await newFile.readAsBytes();
 
-        final ui.Codec verifyCodec =
-        await ui.instantiateImageCodec(newBytes);
+        final ui.Codec verifyCodec = await ui.instantiateImageCodec(newBytes);
 
-        final ui.FrameInfo verifyFrame =
-        await verifyCodec.getNextFrame();
+        final ui.FrameInfo verifyFrame = await verifyCodec.getNextFrame();
 
         final ui.Image verifyImage = verifyFrame.image;
 
         debugPrint("================================");
         debugPrint("RESIZE VERIFIED");
-        debugPrint(
-          "Original : $originalWidth x $originalHeight",
-        );
-        debugPrint(
-          "Target   : ${result.width} x ${result.height}",
-        );
-        debugPrint(
-          "Saved    : ${verifyImage.width} x ${verifyImage.height}",
-        );
+        debugPrint("Original : $originalWidth x $originalHeight");
+        debugPrint("Target   : ${result.width} x ${result.height}");
+        debugPrint("Saved    : ${verifyImage.width} x ${verifyImage.height}");
         debugPrint("Quality  : LOSSLESS PNG");
         debugPrint("================================");
       }
 
-      // =========================================================
-      // REFRESH APP DATA
-      // =========================================================
-
       if (Get.isRegistered<PhotosController>()) {
-        final PhotosController photosController =
-        Get.find<PhotosController>();
+        final PhotosController photosController = Get.find<PhotosController>();
 
         photosController.addEditedAsset(resizedAsset);
       }
@@ -1386,15 +2545,7 @@ class PhotoViewController extends GetxController {
         await Get.find<AlbumsController>().loadAlbums();
       }
 
-      // =========================================================
-      // OPEN RESIZED PHOTO
-      // =========================================================
-
-      Get.off(
-            () => PhotoViewScreen(
-          asset: resizedAsset,
-        ),
-      );
+      Get.off(() => PhotoViewScreen(asset: resizedAsset));
     } catch (e, stackTrace) {
       debugPrint("================================");
       debugPrint("RESIZE ERROR");
@@ -1402,14 +2553,10 @@ class PhotoViewController extends GetxController {
       debugPrintStack(stackTrace: stackTrace);
       debugPrint("================================");
 
-      Get.snackbar(
-        "Resize",
-        "Unable to resize photo",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+      AppToast.show("Unable to resize photo");
     }
   }
+
   Future<void> slideShow() async {
     final result = await Get.dialog<SlideShowResult>(
       const SlideShowDialog(),
@@ -1450,10 +2597,6 @@ class PhotoViewController extends GetxController {
       return;
     }
 
-    // =====================================================
-    // AGAR SLIDESHOW KA FIRST/CURRENT ITEM VIDEO HAI
-    // TO DIRECT VIDEO SCREEN OPEN KARO
-    // =====================================================
     if (currentIndex.value >= 0 &&
         currentIndex.value < media.length &&
         media[currentIndex.value].type == AssetType.video) {
@@ -1461,9 +2604,6 @@ class PhotoViewController extends GetxController {
       return;
     }
 
-    // =====================================================
-    // NORMAL SLIDESHOW TIMER
-    // =====================================================
     slideshowTimer = Timer.periodic(slideshowDuration, (_) async {
       if (!isSlideshow.value) {
         return;
@@ -1514,9 +2654,6 @@ class PhotoViewController extends GetxController {
 
     int nextIndex;
 
-    // =========================================================
-    // RANDOM
-    // =========================================================
     if (slideshowRandomOrder) {
       final availableIndexes = List<int>.generate(
         media.length,
@@ -1536,11 +2673,7 @@ class PhotoViewController extends GetxController {
         availableIndexes.shuffle();
         nextIndex = availableIndexes.first;
       }
-    }
-    // =========================================================
-    // BACKWARD
-    // =========================================================
-    else if (slideshowMoveBackwards) {
+    } else if (slideshowMoveBackwards) {
       nextIndex = currentIndex.value - 1;
 
       if (nextIndex < 0) {
@@ -1551,11 +2684,7 @@ class PhotoViewController extends GetxController {
           return;
         }
       }
-    }
-    // =========================================================
-    // FORWARD
-    // =========================================================
-    else {
+    } else {
       nextIndex = currentIndex.value + 1;
 
       if (nextIndex >= media.length) {
@@ -1567,10 +2696,6 @@ class PhotoViewController extends GetxController {
         }
       }
     }
-
-    // =========================================================
-    // MOVE PAGE FIRST
-    // =========================================================
 
     if (!slideshowPageController.hasClients) {
       return;
@@ -1587,8 +2712,6 @@ class PhotoViewController extends GetxController {
         );
       }
 
-      // PageView ka onPageChanged bhi currentIndex update karega,
-      // lekin yaha bhi sync rakho.
       if (isSlideshow.value) {
         currentIndex.value = nextIndex;
       }
@@ -1691,188 +2814,138 @@ class SlideShowDialog extends StatefulWidget {
 }
 
 class _SlideShowDialogState extends State<SlideShowDialog> {
-  int speed = 1;
+  final RxInt speed = 1.obs;
 
-  String animation = "None";
+  final RxString animation = "None".obs;
 
-  bool includeGifs = true;
-  bool randomOrder = false;
-  bool moveBackwards = false;
-  bool loop = false;
+  final RxBool includeGifs = true.obs;
+  final RxBool randomOrder = false.obs;
+  final RxBool moveBackwards = false.obs;
+  final RxBool loop = false.obs;
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      backgroundColor: InnerChrome.dialogBg,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(22, 20, 22, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Slideshow speed",
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            // SPEED
+            Text('Slideshow', style: ChromeText.title),
+            const SizedBox(height: 12),
+            Text('Speed', style: ChromeText.body),
+            const SizedBox(height: 8),
             Container(
-              height: 36,
+              height: 40,
               decoration: BoxDecoration(
-                color: const Color(0xffeeeeee),
-                borderRadius: BorderRadius.circular(8),
+                color: InnerChrome.dialogField,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   IconButton(
                     onPressed: () {
-                      if (speed > 1) {
-                        setState(() {
-                          speed--;
-                        });
+                      if (speed.value > 1) {
+                        speed.value--;
                       }
                     },
-                    icon: const Icon(Icons.remove, size: 18),
+                    icon: Icon(
+                      Icons.remove,
+                      size: 18,
+                      color: InnerChrome.dialogIcon,
+                    ),
                   ),
-
                   Expanded(
                     child: Center(
-                      child: Text(
-                        "${speed}s",
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                      child: Obx(
+                        () => Text(
+                          '${speed.value}s',
+                          style: ChromeText.row,
                         ),
                       ),
                     ),
                   ),
-
                   IconButton(
                     onPressed: () {
-                      if (speed < 10) {
-                        setState(() {
-                          speed++;
-                        });
+                      if (speed.value < 10) {
+                        speed.value++;
                       }
                     },
-                    icon: const Icon(Icons.add, size: 18),
+                    icon: Icon(
+                      Icons.add,
+                      size: 18,
+                      color: InnerChrome.dialogIcon,
+                    ),
                   ),
                 ],
               ),
             ),
-
             const SizedBox(height: 8),
-
-            // ANIMATION
             _row(
-              "Animation",
+              'Animation',
               DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: animation,
-                  isDense: true,
-                  items: const [
-                    DropdownMenuItem(value: "None", child: Text("None")),
-                    DropdownMenuItem(value: "Fade", child: Text("Fade")),
-                    DropdownMenuItem(value: "Slide", child: Text("Slide")),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-
-                    setState(() {
-                      animation = value;
-                    });
-                  },
+                child: Obx(
+                  () => DropdownButton<String>(
+                    value: animation.value,
+                    isDense: true,
+                    dropdownColor: InnerChrome.dialogDrop,
+                    iconEnabledColor: InnerChrome.dialogIcon,
+                    style: ChromeText.row,
+                    items: [
+                      DropdownMenuItem(
+                        value: 'None',
+                        child: Text('None', style: ChromeText.row),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Fade',
+                        child: Text('Fade', style: ChromeText.row),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Slide',
+                        child: Text('Slide', style: ChromeText.row),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      animation.value = value;
+                    },
+                  ),
                 ),
               ),
             ),
-
-            // INCLUDE GIFS
-            _row(
-              "Include GIFs",
-              Checkbox(
-                value: includeGifs,
-                onChanged: (value) {
-                  setState(() {
-                    includeGifs = value ?? true;
-                  });
-                },
-              ),
-            ),
-
-            // RANDOM
-            _row(
-              "Random order",
-              Checkbox(
-                value: randomOrder,
-                onChanged: (value) {
-                  setState(() {
-                    randomOrder = value ?? false;
-                  });
-                },
-              ),
-            ),
-
-            // BACKWARDS
-            _row(
-              "Move backwards",
-              Checkbox(
-                value: moveBackwards,
-                onChanged: (value) {
-                  setState(() {
-                    moveBackwards = value ?? false;
-                  });
-                },
-              ),
-            ),
-
-            // LOOP
-            _row(
-              "Loop Slideshow",
-              Checkbox(
-                value: loop,
-                onChanged: (value) {
-                  setState(() {
-                    loop = value ?? false;
-                  });
-                },
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
+            _check('Include GIFs', includeGifs, fallback: true),
+            _check('Random order', randomOrder),
+            _check('Move backwards', moveBackwards),
+            _check('Loop Slideshow', loop),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    child: const Text("Cancel"),
+                  child: ChromeButton.cancel(
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
                 ),
-
-                const SizedBox(width: 10),
-
+                const SizedBox(width: 12),
                 Expanded(
-                  child: ElevatedButton(
+                  child: ChromeButton.ok(
                     onPressed: () {
                       Navigator.of(context).pop(
                         SlideShowResult(
-                          duration: Duration(seconds: speed),
-                          animation: animation,
-                          includeGifs: includeGifs,
-                          randomOrder: randomOrder,
-                          moveBackwards: moveBackwards,
-                          loop: loop,
+                          duration: Duration(seconds: speed.value),
+                          animation: animation.value,
+                          includeGifs: includeGifs.value,
+                          randomOrder: randomOrder.value,
+                          moveBackwards: moveBackwards.value,
+                          loop: loop.value,
                         ),
                       );
                     },
-                    child: const Text("OK"),
                   ),
                 ),
               ],
@@ -1883,12 +2956,28 @@ class _SlideShowDialogState extends State<SlideShowDialog> {
     );
   }
 
+  Widget _check(String title, RxBool value, {bool fallback = false}) {
+    return _row(
+      title,
+      Obx(
+        () => Checkbox(
+          value: value.value,
+          activeColor: InnerChrome.accent,
+          side: BorderSide(color: InnerChrome.faint, width: 1.4),
+          onChanged: (next) {
+            value.value = next ?? fallback;
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _row(String title, Widget trailing) {
     return SizedBox(
       height: 40,
       child: Row(
         children: [
-          Expanded(child: Text(title, style: const TextStyle(fontSize: 13))),
+          Expanded(child: Text(title, style: ChromeText.row)),
           trailing,
         ],
       ),
@@ -1923,34 +3012,33 @@ class _RenameDialogState extends State<_RenameDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: const Text("Rename"),
-      content: TextField(
+    return ChromeDialog(
+      title: 'Rename',
+      child: TextField(
         controller: controller,
         autofocus: true,
         textInputAction: TextInputAction.done,
-        decoration: const InputDecoration(hintText: "File name"),
+        style: ChromeText.row,
+        decoration: InputDecoration(
+          hintText: 'File name',
+          hintStyle: TextStyle(color: InnerChrome.dialogHint, fontSize: 14),
+          filled: true,
+          fillColor: InnerChrome.dialogField,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
       ),
       actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-          },
-          child: const Text("Cancel"),
-        ),
-        TextButton(
+        ChromeButton.cancel(onPressed: () => Navigator.of(context).pop()),
+        ChromeButton.ok(
+          label: 'Save',
           onPressed: () {
             final name = controller.text.trim();
-
-            if (name.isEmpty) {
-              return;
-            }
-
+            if (name.isEmpty) return;
             Navigator.of(context).pop(name);
           },
-          child: const Text("Save"),
         ),
       ],
     );
@@ -1962,11 +3050,7 @@ class ResizeResult {
   final int height;
   final String name;
 
-  ResizeResult({
-    required this.width,
-    required this.height,
-    required this.name,
-  });
+  ResizeResult({required this.width, required this.height, required this.name});
 }
 
 class _ResizeDialog extends StatefulWidget {
@@ -2021,10 +3105,6 @@ class _ResizeDialogState extends State<_ResizeDialog> {
     super.dispose();
   }
 
-  // ===========================================================
-  // WIDTH -> HEIGHT
-  // ===========================================================
-
   void _widthChanged() {
     if (_updating) return;
 
@@ -2041,10 +3121,6 @@ class _ResizeDialogState extends State<_ResizeDialog> {
     _updating = false;
   }
 
-  // ===========================================================
-  // HEIGHT -> WIDTH
-  // ===========================================================
-
   void _heightChanged() {
     if (_updating) return;
 
@@ -2060,10 +3136,6 @@ class _ResizeDialogState extends State<_ResizeDialog> {
 
     _updating = false;
   }
-
-  // ===========================================================
-  // RESIZE
-  // ===========================================================
 
   void _resize() {
     final int? width = int.tryParse(widthController.text.trim());
@@ -2084,42 +3156,31 @@ class _ResizeDialogState extends State<_ResizeDialog> {
       return;
     }
 
-    Navigator.of(context).pop(
-      ResizeResult(width: width, height: height, name: name,),
-    );
+    Navigator.of(
+      context,
+    ).pop(ResizeResult(width: width, height: height, name: name));
   }
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Colors.white,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 18),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      backgroundColor: InnerChrome.dialogBg,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // =================================================
-            // TITLE
-            // =================================================
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                "Resize",
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
+              child: Text('Resize', style: ChromeText.title),
             ),
 
             const SizedBox(height: 18),
 
-            // =================================================
-            // WIDTH / HEIGHT
-            // =================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -2130,11 +3191,14 @@ class _ResizeDialogState extends State<_ResizeDialog> {
                   ),
                 ),
 
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(bottom: 10, left: 8, right: 8),
                   child: Text(
                     ":",
-                    style: TextStyle(fontSize: 16, color: Colors.black54),
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: InnerChrome.muted,
+                    ),
                   ),
                 ),
 
@@ -2149,26 +3213,27 @@ class _ResizeDialogState extends State<_ResizeDialog> {
 
             const SizedBox(height: 14),
 
-            // =================================================
-            // NAME / TITLE
-            // =================================================
             TextField(
               controller: nameController,
               textInputAction: TextInputAction.done,
+              style: ChromeText.row,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xffeeeeee),
+                fillColor: InnerChrome.dialogField,
                 hintText: "Title",
-                hintStyle: const TextStyle(fontSize: 13, color: Colors.black54),
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: InnerChrome.dialogHint,
+                ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 12,
                 ),
                 suffixIcon: IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.close,
                     size: 20,
-                    color: Colors.black54,
+                    color: InnerChrome.dialogIcon,
                   ),
                   onPressed: () {
                     nameController.clear();
@@ -2183,9 +3248,6 @@ class _ResizeDialogState extends State<_ResizeDialog> {
 
             const SizedBox(height: 18),
 
-            // =================================================
-            // BUTTONS
-            // =================================================
             Row(
               children: [
                 Expanded(
@@ -2196,10 +3258,10 @@ class _ResizeDialogState extends State<_ResizeDialog> {
                         Navigator.of(context).pop();
                       },
                       style: TextButton.styleFrom(
-                        backgroundColor: const Color(0xffeeeeee),
-                        foregroundColor: Colors.black87,
+                        backgroundColor: InnerChrome.dialogSecondaryBg,
+                        foregroundColor: InnerChrome.dialogSecondaryFg,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(11),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       child: const Text(
@@ -2221,8 +3283,8 @@ class _ResizeDialogState extends State<_ResizeDialog> {
                     child: ElevatedButton(
                       onPressed: _resize,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff292727),
-                        foregroundColor: Colors.white,
+                        backgroundColor: InnerChrome.dialogPrimaryBg,
+                        foregroundColor: InnerChrome.dialogPrimaryFg,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(11),
@@ -2246,10 +3308,6 @@ class _ResizeDialogState extends State<_ResizeDialog> {
     );
   }
 
-  // =========================================================
-  // DIMENSION FIELD
-  // =========================================================
-
   Widget _dimensionField({
     required String label,
     required TextEditingController controller,
@@ -2259,7 +3317,7 @@ class _ResizeDialogState extends State<_ResizeDialog> {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 12, color: Colors.black54),
+          style: TextStyle(fontSize: 12, color: InnerChrome.muted),
         ),
 
         const SizedBox(height: 5),
@@ -2270,7 +3328,7 @@ class _ResizeDialogState extends State<_ResizeDialog> {
           textAlign: TextAlign.left,
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xffe9e9e9),
+            fillColor: InnerChrome.dialogField,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 10,
               vertical: 10,
@@ -2280,7 +3338,7 @@ class _ResizeDialogState extends State<_ResizeDialog> {
               borderSide: BorderSide.none,
             ),
           ),
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
+          style: ChromeText.row,
         ),
       ],
     );

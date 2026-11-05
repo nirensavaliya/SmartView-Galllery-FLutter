@@ -6,11 +6,13 @@ import 'package:gallery_photos/View/Constant/Get_Storage.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class RecycleBinController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool autoClearAfter30Days = true.obs;
-
+  static const String autoClearAfter30DaysKey =
+      'deletePhotosAfter30Days';
   final RxList<RecycleBinItem> recycleItems = <RecycleBinItem>[].obs;
   Directory? _recycleDirectory;
   File? _databaseFile;
@@ -20,6 +22,15 @@ class RecycleBinController extends GetxController {
   void onInit() {
     super.onInit();
     loadRecycleBin();
+    loadRecycleBinSetting();
+  }
+
+void loadRecycleBinSetting() {
+    autoClearAfter30Days.value =
+        GetStorageData.readBoolean(
+          autoClearAfter30DaysKey,
+          defaultValue: true,
+        );
   }
   void startSelection(RecycleBinItem item) {
     if (!selectedItems.contains(item)) {
@@ -55,13 +66,7 @@ class RecycleBinController extends GetxController {
 
       await _saveDatabase();
 
-      Get.snackbar(
-        "Restore",
-        "Selected files restored successfully",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-        duration: const Duration(seconds: 2),
-      );
+      AppToast.show("Selected files restored successfully");
     } catch (e) {
       debugPrint("Restore Selected Error: $e");
     } finally {
@@ -91,13 +96,7 @@ class RecycleBinController extends GetxController {
 
       await _saveDatabase();
 
-      Get.snackbar(
-        "Recycle Bin",
-        "Selected files permanently deleted",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-        duration: const Duration(seconds: 2),
-      );
+      AppToast.show("Selected files permanently deleted");
     } catch (e) {
       debugPrint("Delete Selected Error: $e");
     } finally {
@@ -166,8 +165,7 @@ class RecycleBinController extends GetxController {
     }
   }
 
-
-  Future<bool> addToRecycleBin(AssetEntity asset) async {
+Future<bool> addToRecycleBin(AssetEntity asset) async {
     try {
       await _initStorage();
 
@@ -189,7 +187,6 @@ class RecycleBinController extends GetxController {
 
       final destination = File('${_recycleDirectory!.path}/$uniqueName');
 
-      // Copy original file to RecycleBin
       await sourceFile.copy(destination.path);
 
       final item = RecycleBinItem(
@@ -247,11 +244,7 @@ class RecycleBinController extends GetxController {
       }
 
       if (restoredAsset == null) {
-        Get.snackbar(
-          "Restore",
-          "Unable to restore item",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show("Unable to restore item");
 
         return false;
       }
@@ -266,11 +259,7 @@ class RecycleBinController extends GetxController {
     } catch (e) {
       debugPrint("Restore Error: $e");
 
-      Get.snackbar(
-        "Restore",
-        "Unable to restore item",
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show("Unable to restore item");
 
       return false;
     }
@@ -292,21 +281,10 @@ class RecycleBinController extends GetxController {
       recycleItems.clear();
       await _saveDatabase();
 
-      Get.snackbar(
-        "Restore",
-        "All files restored successfully",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-        duration: const Duration(seconds: 2),
-      );
+      AppToast.show("All files restored successfully");
     } catch (e) {
       debugPrint("Restore All Error: $e");
-      Get.snackbar(
-        "Restore",
-        "Unable to restore all files",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+      AppToast.show("Unable to restore all files");
     } finally {
       isLoading.value = false;
     }
@@ -324,13 +302,7 @@ class RecycleBinController extends GetxController {
 
       await _saveDatabase();
 
-      Get.snackbar(
-        "Recycle Bin",
-        "${item.name} permanently deleted",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-        duration: const Duration(seconds: 2),
-      );
+      AppToast.show("${item.name} permanently deleted");
 
       return true;
     } catch (e) {
@@ -354,12 +326,7 @@ class RecycleBinController extends GetxController {
 
       await _saveDatabase();
 
-      Get.snackbar(
-        "Recycle Bin",
-        "All items permanently deleted",
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(12),
-      );
+      AppToast.show("All items permanently deleted");
     } catch (e) {
       debugPrint("Delete All Error: $e");
     }
@@ -394,17 +361,49 @@ class RecycleBinController extends GetxController {
 
     await _saveDatabase();
   }
-
   void toggleAutoClear(bool value) {
     autoClearAfter30Days.value = value;
+
+    GetStorageData.saveBoolean(
+      autoClearAfter30DaysKey,
+      value,
+    );
+  }
+
+  Future<void> clearRecycleBin() async {
+    try {
+      isLoading.value = true;
+
+      final items = recycleItems.toList();
+
+      for (final item in items) {
+        final file = File(item.recyclePath);
+
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+
+      recycleItems.clear();
+      selectedItems.clear();
+
+      await _saveDatabase();
+
+      AppToast.show("Recycle Bin cleared successfully");
+    } catch (e) {
+      debugPrint("Clear Recycle Bin Error: $e");
+
+      AppToast.show("Unable to clear Recycle Bin");
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   Future<void> refreshRecycleBin() async {
     await loadRecycleBin();
   }
 
-
-  Map<String, List<RecycleBinItem>> get groupedItems {
+Map<String, List<RecycleBinItem>> get groupedItems {
     final Map<String, List<RecycleBinItem>> grouped = {};
 
     for (final item in recycleItems) {
@@ -462,7 +461,6 @@ class RecycleBinController extends GetxController {
       debugPrint("Recycle Bin Rollback Error: $e");
     }
   }
-
 
 }
 

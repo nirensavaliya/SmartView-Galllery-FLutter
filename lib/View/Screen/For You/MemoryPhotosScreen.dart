@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:gallery_photos/View/Constant/Get_Storage.dart';
 import 'package:gallery_photos/View/Screen/For%20You/LikedMemoriesScreen.dart';
 import 'package:gallery_photos/View/Screen/For%20You/MemoryDetailScreen.dart';
@@ -8,6 +9,7 @@ import 'package:gallery_photos/View/Screen/For%20You/MemoryShareScreen.dart';
 import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class MemoryPhotosScreen extends StatelessWidget {
   final String title;
@@ -92,61 +94,103 @@ class MemoryPhotosScreen extends StatelessWidget {
       _applySavedMemoryNames(memories);
       final Map<String, List<MemoryGroup>> grouped = _groupByMonth(currentMemories);
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.page,
         appBar: AppBar(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
+          backgroundColor: InnerChrome.page,
+          surfaceTintColor: Colors.transparent,
+          foregroundColor: InnerChrome.ink,
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-            onPressed: () {
-              Get.back();
-            },
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: InnerChrome.alt,
+                shape: BoxShape.circle,
+                border: Border.all(color: InnerChrome.line),
+              ),
+              child: IconButton(
+                icon: Icon(Icons.arrow_back_ios_new, size: 20, color: InnerChrome.ink),
+                onPressed: () {
+                  Get.back();
+                },
+              ),
+            ),
           ),
 
           title: Text(
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
+            style: TextStyle(
+              fontFamily: 'Plus Jakarta Sans',
+              color: InnerChrome.ink,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
             ),
           ),
 
           actions: [
-            IconButton(
-              icon: const Icon(Icons.add, color: Colors.black, size: 28),
-              onPressed: () {
-                _showCreateMemoryDialog(context);
-              },
-            ),
-            Obx(() {
-              if (controller.likedMemoryIds.isEmpty) {
-                return const SizedBox.shrink();
-              }
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: GestureDetector(
+                onTap: (){
+                  _showCreateMemoryDialog(context);
 
-              return IconButton(
-                icon: const Icon(Icons.favorite, color: Colors.red, size: 26),
-                onPressed: () {
-                  final List<MemoryGroup> likedMemories = controller.memories
-                      .where((memory) {
-                        return controller.isMemoryLiked(memory);
-                      })
-                      .toList();
-
-                  Get.to(() => LikedMemoriesScreen(memories: likedMemories));
                 },
-              );
-            }),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: InnerChrome.alt,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: InnerChrome.line),
+                  ),
+                  child: Icon(Icons.add, color: InnerChrome.ink, size: 28)
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Obx(() {
+                if (controller.likedMemoryIds.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                return GestureDetector(
+                  onTap: (){
+                    final List<MemoryGroup> likedMemories = controller.memories
+                        .where((memory) {
+                      return controller.isMemoryLiked(memory);
+                    })
+                        .toList();
+
+                    Get.to(() => LikedMemoriesScreen(memories: likedMemories));
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: InnerChrome.alt,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: InnerChrome.line),
+                    ),
+                    child: const Icon(Icons.favorite, color: Colors.red, size: 26),
+                  ),
+                );
+              }),
+            ),
           ],
         ),
         body: controller.memories.isEmpty
-            ? const Center(
+            ? Center(
                 child: Text(
                   'No memories found',
-                  style: TextStyle(color: Colors.black54, fontSize: 16),
+                  style: TextStyle(
+                      fontFamily: 'Plus Jakarta Sans',
+                      color: InnerChrome.muted, fontSize: 16),
                 ),
               )
             : ListView.builder(
@@ -171,8 +215,9 @@ class MemoryPhotosScreen extends StatelessWidget {
                         ),
                         child: Text(
                           _monthYear(monthDate),
-                          style: const TextStyle(
-                            color: Colors.black,
+                          style: TextStyle(
+                            fontFamily: 'Plus Jakarta Sans',
+                            color: InnerChrome.ink,
                             fontSize: 22,
                             fontWeight: FontWeight.w700,
                           ),
@@ -237,7 +282,7 @@ class MemoryPhotosScreen extends StatelessWidget {
 
     Get.dialog(
       Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.sheet,
         insetPadding: const EdgeInsets.symmetric(horizontal: 32),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
@@ -248,10 +293,10 @@ class MemoryPhotosScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Create New Memory',
                 style: TextStyle(
-                  color: Colors.black87,
+                  color: InnerChrome.ink,
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
                 ),
@@ -262,12 +307,13 @@ class MemoryPhotosScreen extends StatelessWidget {
               TextField(
                 controller: nameController,
                 autofocus: true,
+                style: TextStyle(color: InnerChrome.ink, fontSize: 14),
                 maxLines: 1,
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   hintText: 'Memory title',
-                  hintStyle: const TextStyle(
-                    color: Colors.black45,
+                  hintStyle: TextStyle(
+                    color: InnerChrome.muted,
                     fontSize: 14,
                   ),
                   contentPadding: const EdgeInsets.symmetric(
@@ -277,13 +323,13 @@ class MemoryPhotosScreen extends StatelessWidget {
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
                     borderSide: BorderSide(
-                      color: Colors.grey.shade300,
+                      color: InnerChrome.line,
                     ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
-                    borderSide: const BorderSide(
-                      color: Colors.black54,
+                    borderSide: BorderSide(
+                      color: InnerChrome.accent,
                     ),
                   ),
                 ),
@@ -302,15 +348,15 @@ class MemoryPhotosScreen extends StatelessWidget {
                           Get.back();
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: InnerChrome.alt,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Cancel',
                           style: TextStyle(
-                            color: Colors.black87,
+                            color: InnerChrome.ink,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -346,7 +392,7 @@ class MemoryPhotosScreen extends StatelessWidget {
                           );
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.black87,
+                          backgroundColor: InnerChrome.accent,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
@@ -403,7 +449,7 @@ class _MemoryCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: Colors.grey.shade200,
+          color: InnerChrome.alt,
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -437,7 +483,7 @@ class _MemoryCard extends StatelessWidget {
                   bottom: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.30),
+                  color: AppColors.surface(Colors.black.withOpacity(0.30)),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -455,6 +501,7 @@ class _MemoryCard extends StatelessWidget {
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16,
+                              fontFamily: 'Plus Jakarta Sans',
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -468,6 +515,7 @@ class _MemoryCard extends StatelessWidget {
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 12,
+                              fontFamily: 'Plus Jakarta Sans',
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -497,11 +545,6 @@ class _MemoryCard extends StatelessWidget {
                       onPressed: () {
                         _showMemoryMenu(context, memory);
                       },
-                      // padding: EdgeInsets.zero,
-                      // constraints: const BoxConstraints(
-                      //   minWidth: 40,
-                      //   minHeight: 40,
-                      // ),
                       icon: const Icon(
                         Icons.more_vert,
                         color: Colors.white,
@@ -547,43 +590,43 @@ class _MemoryCard extends StatelessWidget {
       context: context,
       position: position,
       elevation: 8,
-      color: Colors.white,
+      color: InnerChrome.sheet,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       constraints: const BoxConstraints(minWidth: 155, maxWidth: 155),
       items: [
         PopupMenuItem<String>(
           value: 'share',
           height: 42,
-          child: const Text(
+          child: Text(
             'Share',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'rename',
           height: 42,
-          child: const Text(
+          child: Text(
             'Rename',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'cover',
           height: 42,
-          child: const Text(
+          child: Text(
             'Change Cover',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'delete',
           height: 42,
-          child: const Text(
+          child: Text(
             'Delete Memory',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(color: InnerChrome.ink, fontSize: 13),
           ),
         ),
       ],
@@ -621,7 +664,7 @@ class _MemoryCard extends StatelessWidget {
 
     Get.dialog(
       Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.sheet,
         insetPadding: const EdgeInsets.symmetric(horizontal: 32),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: Padding(
@@ -630,10 +673,10 @@ class _MemoryCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Rename',
                 style: TextStyle(
-                  color: Colors.black87,
+                  color: InnerChrome.ink,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -643,12 +686,13 @@ class _MemoryCard extends StatelessWidget {
               TextField(
                 controller: nameController,
                 autofocus: true,
+                style: TextStyle(color: InnerChrome.ink, fontSize: 14),
                 maxLines: 1,
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   hintText: 'Enter memory name',
-                  hintStyle: const TextStyle(
-                    color: Colors.black45,
+                  hintStyle: TextStyle(
+                    color: InnerChrome.muted,
                     fontSize: 14,
                   ),
                   contentPadding: const EdgeInsets.symmetric(
@@ -657,11 +701,11 @@ class _MemoryCard extends StatelessWidget {
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
+                    borderSide: BorderSide(color: InnerChrome.line),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
-                    borderSide: const BorderSide(color: Colors.black54),
+                    borderSide: BorderSide(color: InnerChrome.accent),
                   ),
                 ),
                 onSubmitted: (_) {
@@ -682,15 +726,15 @@ class _MemoryCard extends StatelessWidget {
                           Get.back();
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: InnerChrome.alt,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Cancel',
                           style: TextStyle(
-                            color: Colors.black87,
+                            color: InnerChrome.ink,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -709,7 +753,7 @@ class _MemoryCard extends StatelessWidget {
                           _renameMemory(nameController, memory);
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.black87,
+                          backgroundColor: InnerChrome.accent,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
@@ -781,7 +825,7 @@ class _MemoryCard extends StatelessWidget {
   void _showDeleteMemoryDialog(BuildContext context, MemoryGroup memory) {
     Get.dialog(
       Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.sheet,
         insetPadding: const EdgeInsets.symmetric(horizontal: 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: Padding(
@@ -789,15 +833,12 @@ class _MemoryCard extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // =========================
-              // TITLE
-              // =========================
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Do you want to delete this memory?',
                   style: TextStyle(
-                    color: Colors.black87,
+                    color: InnerChrome.ink,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -806,9 +847,6 @@ class _MemoryCard extends StatelessWidget {
 
               const SizedBox(height: 18),
 
-              // =========================
-              // BUTTONS
-              // =========================
               Row(
                 children: [
                   Expanded(
@@ -819,15 +857,15 @@ class _MemoryCard extends StatelessWidget {
                           Get.back();
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: InnerChrome.alt,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Cancel',
                           style: TextStyle(
-                            color: Colors.black87,
+                            color: InnerChrome.ink,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -846,7 +884,7 @@ class _MemoryCard extends StatelessWidget {
                           _deleteMemory(memory);
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: const Color(0xff29262A),
+                          backgroundColor: InnerChrome.danger,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
@@ -887,16 +925,13 @@ class _MemoryCard extends StatelessWidget {
         .map((e) => e.toString())
         .toSet();
 
-    // Is memory ko deleted mark karo
     deletedIds.add(memoryKey);
 
-    // Permanently save
     await GetStorageData.saveObject(
       GetStorageData.deletedMemories,
       deletedIds.toList(),
     );
 
-    // Rename data bhi remove kar do
     final Map<String, dynamic> savedNames = Map<String, dynamic>.from(
       GetStorageData.readObject(GetStorageData.memoryNames) ?? {},
     );
@@ -905,11 +940,9 @@ class _MemoryCard extends StatelessWidget {
 
     await GetStorageData.saveObject(GetStorageData.memoryNames, savedNames);
 
-    // Current screen se immediately remove
     controller.memories.remove(memory);
     controller.memories.refresh();
 
-    // Dialog close
     Get.back();
   }
 }
@@ -926,16 +959,16 @@ class _CoverImage extends StatelessWidget {
 
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(color: Colors.grey.shade300);
+          return Container(color: InnerChrome.alt);
         }
 
         if (snapshot.hasError || snapshot.data == null) {
           return Container(
-            color: Colors.grey.shade300,
-            child: const Center(
+            color: InnerChrome.alt,
+            child: Center(
               child: Icon(
                 Icons.broken_image_outlined,
-                color: Colors.grey,
+                color: InnerChrome.muted,
                 size: 40,
               ),
             ),

@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,17 +6,14 @@ import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class MemoryShareController extends GetxController {
   final List<AssetEntity> assets;
 
-  MemoryShareController({
-    required this.assets,
-  });
+  MemoryShareController({required this.assets,});
 
-  // Initially NOTHING is selected
-  final RxSet<int> selectedIndexes = <int>{}.obs;
-
+  final RxSet<int> selectedIndexes = RxSet<int>();
   final RxBool isSharing = false.obs;
 
   bool isSelected(int index) {
@@ -47,11 +45,7 @@ class MemoryShareController extends GetxController {
 
   Future<void> shareSelected() async {
     if (selectedIndexes.isEmpty) {
-      Get.snackbar(
-        'Share',
-        'Please select at least one photo',
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show('Please select at least one photo');
       return;
     }
 
@@ -63,16 +57,12 @@ class MemoryShareController extends GetxController {
       final List<XFile> files = [];
       final List<String> fileNames = [];
 
-      // Keep selected order
       final List<int> indexes =
       selectedIndexes.toList()..sort();
 
       for (final index in indexes) {
         final AssetEntity asset = assets[index];
 
-        // ---------------------------------------
-        // FIRST TRY: original file
-        // ---------------------------------------
         final file = await asset.originFile;
 
         if (file != null) {
@@ -90,9 +80,6 @@ class MemoryShareController extends GetxController {
           continue;
         }
 
-        // ---------------------------------------
-        // FALLBACK: original bytes
-        // ---------------------------------------
         final Uint8List? bytes =
         await asset.originBytes;
 
@@ -110,31 +97,19 @@ class MemoryShareController extends GetxController {
         }
       }
 
-      // No files could be loaded
       if (files.isEmpty) {
-        Get.snackbar(
-          'Share',
-          'Unable to load selected photos',
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        AppToast.show('Unable to load selected photos');
         return;
       }
 
-      // ---------------------------------------
-      // SHARE
-      // ---------------------------------------
       await Share.shareXFiles(
         files,
         fileNameOverrides: fileNames,
       );
     } catch (e) {
-      print('MEMORY SHARE ERROR: $e');
+      log('MEMORY SHARE ERROR: $e');
 
-      Get.snackbar(
-        'Share Error',
-        'Unable to share photos',
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      AppToast.show('Unable to share photos');
     } finally {
       isSharing.value = false;
     }
@@ -152,19 +127,21 @@ class MemoryShareController extends GetxController {
       final ForYouController forYouController =
       Get.find<ForYouController>();
 
-      // New memory create
       final MemoryGroup newMemory = MemoryGroup(
         title: name,
         date: DateTime.now(),
         assets: selectedAssets,
       );
 
-      // Current UI me immediately add
       forYouController.memories.add(newMemory);
+      forYouController.memories.sort((a, b) => b.date.compareTo(a.date),);
       forYouController.memories.refresh();
 
-      debugPrint(
-        'MEMORY CREATED => $name | PHOTOS = ${selectedAssets.length}',
+      await forYouController.saveCustomMemory(newMemory);
+
+      debugPrint('MEMORY CREATED + SAVED => $name | ''PHOTOS = ${selectedAssets.length}',);
+
+      debugPrint('MEMORY CREATED => $name | PHOTOS = ${selectedAssets.length}',
       );
     } catch (e, stack) {
       debugPrint('CREATE MEMORY ERROR => $e');

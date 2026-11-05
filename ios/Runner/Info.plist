@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>GMSApiKey</key>
+	<string>AIzaSyBfKslCC4SNRXEVrgX9StfdHCn3MPt5XDY</string>
+
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
@@ -18,6 +21,8 @@
 
     <key>NSMicrophoneUsageDescription</key>
     <string>Gallery Photos needs microphone access to record video with sound.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Use Face ID to open Private.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

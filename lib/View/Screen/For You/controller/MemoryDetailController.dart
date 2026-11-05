@@ -38,7 +38,7 @@ class MemoryDetailController extends GetxController
   final ScrollController thumbnailScrollController = ScrollController();
 
   late PageController pageController;
-
+  final RxBool isMusicMuted = false.obs;
   Timer? slideshowTimer;
 
   late AnimationController introController;
@@ -53,13 +53,30 @@ class MemoryDetailController extends GetxController
 
   late Animation<double> exitOpacity;
   final RxBool showEndScreen = false.obs;
-  final RxString selectedMusic = 'Audio 1'.obs;
+  final RxString selectedMusic = 'Audio 3'.obs;
 
   final RxString selectedMusicPath =
-      'Music/audio1.mp3'.obs;
+      'Music/audio3.mp3'.obs;
 
   final AudioPlayer musicPlayer = AudioPlayer();
+  bool get isLiked {
+    if (currentMemory == null) return false;
 
+    final ForYouController controller = Get.find<ForYouController>();
+    return controller.isMemoryLiked(currentMemory!);
+  }
+
+  double get progress {
+    if (assets.isEmpty) return 0.0;
+
+    return (currentIndex.value + 1) / assets.length;
+  }
+  void toggleLike() {
+    if (currentMemory == null) return;
+
+    final ForYouController controller = Get.find<ForYouController>();
+    controller.toggleMemoryLike(currentMemory!);
+  }
   @override
   void onInit() {
     super.onInit();
@@ -101,12 +118,10 @@ class MemoryDetailController extends GetxController
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (isClosed) return;
 
-      // Default music start
       await playSelectedMusic(selectedMusicPath.value);
 
       if (isClosed) return;
 
-      // Slideshow start
       startSlideshow();
     });
   }
@@ -116,8 +131,16 @@ class MemoryDetailController extends GetxController
 
     return controller.loadMemoryImage(asset);
   }
-
-  Future<void> selectMusic({required String name, required String path}) async {
+  void showControls() {
+    if (showIntro.value) {
+      dismissIntro();
+    }
+    controlsVisible.value = true;
+  }
+  Future<void> selectMusic({
+    required String name,
+    required String path,
+  }) async {
     selectedMusic.value = name;
     selectedMusicPath.value = path;
 
@@ -141,6 +164,27 @@ class MemoryDetailController extends GetxController
       debugPrint('❌ Music play error: $e');
     }
   }
+  Future<void> playMusicIfNeeded() async {
+    try {
+      if (musicPlayer.state == PlayerState.playing) {
+        return;
+      }
+
+      await musicPlayer.setReleaseMode(
+        ReleaseMode.loop,
+      );
+
+      await musicPlayer.play(
+        AssetSource(selectedMusicPath.value),
+      );
+
+      debugPrint(
+        '🎵 Slideshow music started: ${selectedMusicPath.value}',
+      );
+    } catch (e) {
+      debugPrint('❌ Slideshow music error: $e');
+    }
+  }
 
   Future<void> dismissIntro() async {
     if (!showIntro.value) {
@@ -151,7 +195,6 @@ class MemoryDetailController extends GetxController
 
     introController.stop();
 
-    // Name/date ko smoothly hide karo
     await exitController.forward();
 
     if (isClosed) {
@@ -177,6 +220,7 @@ class MemoryDetailController extends GetxController
     isSlideshowRunning.value = true;
 
     isPlaying.value = true;
+    playMusicIfNeeded();
 
     scheduleNextPhoto();
   }
@@ -214,12 +258,7 @@ class MemoryDetailController extends GetxController
       }
     });
 
-    // Next image ko already background me ready rakho.
-    // if (nextIndex + 1 < assets.length) {
-    //   loadImage(assets[nextIndex + 1]);
-    // }
-
-    if (nextIndex >= assets.length - 1) {
+if (nextIndex >= assets.length - 1) {
       finishSlideshow();
     } else {
       scheduleNextPhoto();
@@ -235,7 +274,7 @@ class MemoryDetailController extends GetxController
 
     isPlaying.value = false;
     controlsVisible.value = false;
-
+    musicPlayer.stop();
     Future.delayed(const Duration(milliseconds: 700), () {
       if (!isClosed) {
         showEndScreen.value = true;
@@ -243,29 +282,43 @@ class MemoryDetailController extends GetxController
     });
   }
 
-  void restartMemory() {
+  Future<void> restartMemory() async {
     slideshowTimer?.cancel();
     slideshowTimer = null;
+
+    await musicPlayer.stop();
 
     showEndScreen.value = false;
     slideshowFinished.value = false;
 
     currentIndex.value = 0;
 
-    pageController.jumpToPage(0);
+    if (pageController.hasClients) {
+      pageController.jumpToPage(0);
+    }
 
-    // Restart ke baad controls wapas nahi chahiye
-    // jab tak user screen par tap na kare.
     controlsVisible.value = false;
+    showIntro.value = false;
 
     isSlideshowRunning.value = false;
     isPlaying.value = false;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!isClosed) {
-        startSlideshow();
-      }
-    });
+    await Future.delayed(
+      const Duration(milliseconds: 100),
+    );
+
+    if (isClosed) return;
+
+    await playSelectedMusic(
+      selectedMusicPath.value,
+    );
+
+    if (isClosed) return;
+
+    isSlideshowRunning.value = true;
+    isPlaying.value = true;
+
+    scheduleNextPhoto();
   }
 
   void closeEndScreen() {
@@ -281,21 +334,64 @@ class MemoryDetailController extends GetxController
     isPlaying.value = false;
   }
 
-  void toggleSlideshow() {
-    if (assets.length <= 1 || slideshowFinished.value) {
-      return;
-    }
-
+  Future<void> toggleSlideshow() async {
     if (isPlaying.value) {
-      stopSlideshow();
+      isPlaying.value = false;
+      isSlideshowRunning.value = false;
+
+      slideshowTimer?.cancel();
+      slideshowTimer = null;
+
+      await musicPlayer.pause();
     } else {
-      startSlideshow();
-      controlsVisible.value = true;
-      showIntro.value = false;
-      showEndScreen.value = false;
+      isPlaying.value = true;
+      isSlideshowRunning.value = true;
+
+      if (!isMusicMuted.value) {
+        await musicPlayer.resume();
+      }
+
+      slideshowTimer?.cancel();
+
+      slideshowTimer = Timer.periodic(
+        const Duration(seconds: 2),
+            (_) {
+          if (!isPlaying.value || !isSlideshowRunning.value) {
+            return;
+          }
+
+          if (currentIndex.value < assets.length - 1) {
+            currentIndex.value++;
+            moveThumbnailToSelected(currentIndex.value);
+          } else {
+            slideshowTimer?.cancel();
+            slideshowTimer = null;
+
+            isPlaying.value = false;
+            isSlideshowRunning.value = false;
+
+            finishSlideshow();
+          }
+        },
+      );
     }
   }
 
+  Future<void> toggleMusicMute() async {
+    if (isMusicMuted.value) {
+      isMusicMuted.value = false;
+
+      await musicPlayer.setVolume(1.0);
+
+      if (isPlaying.value) {
+        await musicPlayer.resume();
+      }
+    } else {
+      isMusicMuted.value = true;
+
+      await musicPlayer.setVolume(0.0);
+    }
+  }
   void onPageChanged(int index) {
     if (isClosed) {
       return;
@@ -303,21 +399,16 @@ class MemoryDetailController extends GetxController
 
     currentIndex.value = index;
 
-    // First photo ke baad name/date hide
     if (index > 0) {
       showIntro.value = false;
     }
 
-    // Bottom thumbnails slideshow ke saath move honge
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!isClosed) {
         moveThumbnailToSelected(index);
       }
     });
 
-    if (index >= assets.length - 1) {
-      finishSlideshow();
-    }
   }
 
   void moveThumbnailToSelected(int index) {
@@ -344,9 +435,6 @@ class MemoryDetailController extends GetxController
     );
   }
 
-  // ============================================================
-  // THUMBNAIL CLICK
-  // ============================================================
   void selectThumbnail(int index) {
     if (isClosed || index < 0 || index >= assets.length) {
       return;
@@ -354,16 +442,18 @@ class MemoryDetailController extends GetxController
     showEndScreen.value = false;
     slideshowFinished.value = false;
     currentIndex.value = index;
-
+    if (index < assets.length - 1) {
+      isPlaying.value = false;
+      isSlideshowRunning.value = false;
+      slideshowTimer?.cancel();
+      slideshowTimer = null;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!isClosed) {
         moveThumbnailToSelected(index);
       }
     });
   }
-  // ============================================================
-  // DISPOSE
-  // ============================================================
 
   @override
   void onClose() {

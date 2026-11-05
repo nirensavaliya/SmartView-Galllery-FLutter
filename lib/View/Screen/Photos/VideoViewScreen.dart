@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/videoController.dart';
+import 'package:gallery_photos/View/Screen/Photos/VideoTrimScreen.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class VideoViewScreen extends StatelessWidget {
   final AssetEntity asset;
@@ -116,7 +118,6 @@ class VideoViewScreen extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // -10 SEC
                           IconButton(
                             onPressed: () {
                               controller.seekRelative(-10);
@@ -130,14 +131,13 @@ class VideoViewScreen extends StatelessWidget {
 
                           const SizedBox(width: 30),
 
-                          // PLAY / PAUSE
                           GestureDetector(
                             onTap: controller.togglePlayPause,
                             child: Container(
                               width: 68,
                               height: 68,
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
+                              decoration: BoxDecoration(
+                                color: AppColors.surface(Colors.black54),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -152,7 +152,6 @@ class VideoViewScreen extends StatelessWidget {
 
                           const SizedBox(width: 30),
 
-                          // +10 SEC
                           IconButton(
                             onPressed: () {
                               controller.seekRelative(10);
@@ -266,7 +265,21 @@ class VideoViewScreen extends StatelessWidget {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceEvenly,
                                 children: [
-                                  // LOCK
+                                  IconButton(
+                                    onPressed: () async {
+                                      await controller.videoController.value?.pause();
+                                      controller.isPlaying.value = false;
+                                      await Get.to(
+                                        () => VideoTrimScreen(asset: asset),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.content_cut,
+                                      color: Colors.white,
+                                      size: 26,
+                                    ),
+                                  ),
+
                                   IconButton(
                                     onPressed: controller.lockVideo,
                                     icon: const Icon(
@@ -276,7 +289,6 @@ class VideoViewScreen extends StatelessWidget {
                                     ),
                                   ),
 
-                                  // FULLSCREEN
                                   IconButton(
                                     onPressed: controller.toggleFullScreen,
                                     icon: const Icon(
@@ -286,7 +298,6 @@ class VideoViewScreen extends StatelessWidget {
                                     ),
                                   ),
 
-                                  // PHOTO VIEW
                                   IconButton(
                                     onPressed:
                                         controller.openPhotoViewWithMiniVideo,
@@ -297,7 +308,6 @@ class VideoViewScreen extends StatelessWidget {
                                     ),
                                   ),
 
-                                  // PLAY / PAUSE
                                   IconButton(
                                     onPressed: controller.togglePlayPause,
                                     icon: Icon(
@@ -318,9 +328,6 @@ class VideoViewScreen extends StatelessWidget {
                   ),
                 ),
 
-              // =====================================================
-              // LOCKED UI
-              // =====================================================
               if (controller.isLocked.value)
                 Positioned(
                   left: 20,

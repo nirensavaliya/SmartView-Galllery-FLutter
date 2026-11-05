@@ -2,12 +2,16 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:gallery_photos/View/Screen/OCR/Controller/OcrController.dart';
+import 'package:gallery_photos/View/Screen/OCR/OcrSelectionOverlay.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotoViewController.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
 import 'package:gallery_photos/View/Screen/Photos/VideoViewScreen.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class PhotoViewScreen extends StatefulWidget {
   final AssetEntity asset;
@@ -31,6 +35,19 @@ class PhotoViewScreen extends StatefulWidget {
 class _PhotoViewScreenState extends State<PhotoViewScreen> {
   late PageController _pageController;
   late PhotoViewController controller;
+  bool _ocrMode = false;
+
+  void enableOcrMode() {
+    setState(() {
+      _ocrMode = true;
+    });
+  }
+
+  void disableOcrMode() {
+    setState(() {
+      _ocrMode = false;
+    });
+  }
   @override
   void initState() {
     super.initState();
@@ -71,17 +88,17 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
   @override
   Widget build(BuildContext context) {
     final PhotosController? photosController =
-    Get.isRegistered<PhotosController>()
+        Get.isRegistered<PhotosController>()
         ? Get.find<PhotosController>()
         : null;
     return Scaffold(
       backgroundColor: Colors.black,
       body: Builder(
-        builder:(context){
+        builder: (context) {
           final List<AssetEntity> media =
               widget.albumMedia ??
-                  photosController?.filteredMedia ??
-                  <AssetEntity>[];
+              photosController?.filteredMedia ??
+              <AssetEntity>[];
 
           if (media.isEmpty) {
             return const Center(
@@ -109,12 +126,10 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                       if (!controller.isSlideshow.value) {
                         return;
                       }
-                      // final List<AssetEntity> media =
-                      //     widget.albumMedia ?? photosController.filteredMedia;
                       final List<AssetEntity> media =
                           widget.albumMedia ??
-                              photosController?.filteredMedia ??
-                              <AssetEntity>[];
+                          photosController?.filteredMedia ??
+                          <AssetEntity>[];
                       if (index < 0 || index >= media.length) {
                         return;
                       }
@@ -132,6 +147,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                         miniVideoController: widget.miniVideoController,
                         miniVideoAssetId: widget.miniVideoAssetId,
                         isSlideshow: controller.isSlideshow.value,
+                        ocrMode: _ocrMode,
                       );
                     },
                   ),
@@ -199,7 +215,20 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                               ],
                             ),
                           ),
-
+                          Obx(
+                            () => IconButton(
+                              onPressed: controller.toggleFavorite,
+                              icon: Icon(
+                                controller.isFavorite.value
+                                    ? Icons.favorite_rounded
+                                    : Icons.favorite_border_rounded,
+                                color: controller.isFavorite.value
+                                    ? Colors.red
+                                    : Colors.white,
+                                size: 27,
+                              ),
+                            ),
+                          ),
                           IconButton(
                             onPressed: controller.showDetails,
                             icon: const Icon(
@@ -234,32 +263,66 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                           _actionButton(
                             Icons.share,
                             "Share",
-                                (_) => controller.sharePhoto(),
+                            (_) => controller.sharePhoto(),
                           ),
 
-                          _actionButton(
-                            Icons.lock_outline,
-                            "Lock",
-                                (_) => controller.lockPhoto(),
-                          ),
+                          _actionButton(Icons.lock_outline, "Lock", (_) async {
+                            final bool locked = await controller.lockPhoto();
+
+                            if (!locked || !mounted) {
+                              return;
+                            }
+
+                            setState(() {});
+                            await _showNextPhotoAfterLock();
+                          }),
 
                           _actionButton(
                             Icons.delete_outline,
                             "Delete",
-                                (_) => controller.deletePhoto(),
+                            (_) => controller.deletePhoto(),
                           ),
 
                           if (currentAsset.type != AssetType.video)
                             _actionButton(
                               Icons.auto_fix_high_outlined,
                               "Edit",
-                                  (_) => controller.editPhoto(),
+                              (_) => controller.editPhoto(),
                             ),
+                          if (currentAsset.type != AssetType.video)
+                            _actionButton(
+                              Icons.text_fields,
+                              "Text",
+                                  (_) async {
+                                final file = await currentAsset.file;
 
+                                if (file == null) {
+                                  Fluttertoast.showToast(
+                                    msg: "Unable to open this image",
+                                  );
+                                  return;
+                                }
+
+                                final ocrController =
+                                Get.isRegistered<OcrController>()
+                                    ? Get.find<OcrController>()
+                                    : Get.put(OcrController());
+
+                                await ocrController.extractText(file);
+
+                                if (ocrController.words.isEmpty) {
+                                  Fluttertoast.showToast(
+                                    msg: "No text found in this image",
+                                  );
+                                  return;
+                                }
+                                enableOcrMode();
+                              },
+                            ),
                           _actionButton(
                             Icons.more_vert,
                             "More",
-                                (context) => controller.showMore(context),
+                            (context) => controller.showMore(context),
                           ),
                         ],
                       ),
@@ -282,9 +345,41 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                 ),
             ],
           );
-        }
-      )
+        },
+      ),
     );
+  }
+
+  Future<void> _showNextPhotoAfterLock() async {
+    final PhotosController? photosController =
+        Get.isRegistered<PhotosController>()
+        ? Get.find<PhotosController>()
+        : null;
+
+    if (photosController == null) {
+      Get.back();
+      return;
+    }
+
+    final List<AssetEntity> media =
+        widget.albumMedia ?? photosController.filteredMedia;
+
+    if (media.isEmpty) {
+      Get.back();
+      return;
+    }
+
+    int index = controller.currentIndex.value;
+
+    if (index >= media.length) {
+      index = media.length - 1;
+    }
+
+    controller.currentIndex.value = index;
+
+    if (controller.slideshowPageController.hasClients) {
+      controller.slideshowPageController.jumpToPage(index);
+    }
   }
 
   Widget _actionButton(
@@ -322,12 +417,14 @@ class _MediaPage extends StatefulWidget {
   final VideoPlayerController? miniVideoController;
   final String? miniVideoAssetId;
   final bool isSlideshow;
+  final bool ocrMode;
 
   const _MediaPage({
     required this.asset,
     this.miniVideoController,
     this.miniVideoAssetId,
     this.isSlideshow = false,
+    this.ocrMode = false,
   });
 
   @override
@@ -336,6 +433,7 @@ class _MediaPage extends StatefulWidget {
 
 class _MediaPageState extends State<_MediaPage> {
   late Future<File?> _fileFuture;
+
 
   @override
   void initState() {
@@ -392,18 +490,32 @@ class _MediaPageState extends State<_MediaPage> {
           );
         }
 
-        return InteractiveViewer(
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+          InteractiveViewer(
           minScale: 1,
           maxScale: 5,
+
+          panEnabled: !widget.ocrMode,
+          scaleEnabled: !widget.ocrMode,
+
           child: Center(
             child: Image.file(
               file,
               fit: BoxFit.contain,
-
-              // Image ko unnecessarily re-decode/repaint hone se help milegi
               gaplessPlayback: true,
             ),
           ),
+        ),
+
+            if (widget.ocrMode)
+              Positioned.fill(
+                child: OcrSelectionOverlay(
+                  controller: Get.find<OcrController>(),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -438,10 +550,6 @@ class _MediaPageState extends State<_MediaPage> {
         },
       );
     }
-
-    // =========================================================
-    // NORMAL VIDEO
-    // =========================================================
 
     return GestureDetector(
       onTap: () {
@@ -486,8 +594,8 @@ class _MediaPageState extends State<_MediaPage> {
 
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface(Colors.black54),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -555,9 +663,6 @@ class _MiniVideoPlayer extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // =====================================================
-                // VIDEO
-                // =====================================================
                 RepaintBoundary(
                   child: FittedBox(
                     fit: BoxFit.cover,
@@ -569,14 +674,10 @@ class _MiniVideoPlayer extends StatelessWidget {
                   ),
                 ),
 
-                // =====================================================
-                // OVERLAY
-                // =====================================================
-                Positioned.fill(child: Container(color: Colors.black26)),
+                Positioned.fill(
+                  child: Container(color: AppColors.surface(Colors.black26)),
+                ),
 
-                // =====================================================
-                // CLOSE
-                // =====================================================
                 Positioned(
                   top: 3,
                   right: 3,
@@ -598,9 +699,6 @@ class _MiniVideoPlayer extends StatelessWidget {
                   ),
                 ),
 
-                // =====================================================
-                // EXPAND
-                // =====================================================
                 Positioned(
                   top: 3,
                   left: 3,
@@ -631,8 +729,8 @@ class _MiniVideoPlayer extends StatelessWidget {
                     child: Container(
                       width: 52,
                       height: 52,
-                      decoration: const BoxDecoration(
-                        color: Colors.black54,
+                      decoration: BoxDecoration(
+                        color: AppColors.surface(Colors.black54),
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
@@ -657,6 +755,7 @@ class _MiniVideoPlayer extends StatelessWidget {
     );
   }
 }
+
 class _MiniVideoOverlay extends StatelessWidget {
   final PhotoViewController controller;
   final VideoPlayerController? miniVideoController;

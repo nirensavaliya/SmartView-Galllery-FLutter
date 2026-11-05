@@ -5,6 +5,8 @@ import 'package:gallery_photos/View/Constant/App_font.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
 import 'package:gallery_photos/View/Screen/RecycleBin/Controller/RecycleBinController.dart';
 import 'package:get/get.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
+import 'package:gallery_photos/View/Widget/ChromeDialog.dart';
 
 class RecycleBinViewerScreen extends StatelessWidget {
   final RecycleBinItem item;
@@ -80,28 +82,6 @@ class RecycleBinViewerScreen extends StatelessWidget {
                 ),
               ),
             ),
-            // Positioned(
-            //   top: 0,
-            //   left: 0,
-            //   right: 0,
-            //   child: Container(
-            //     padding: const EdgeInsets.symmetric(
-            //       horizontal: 8,
-            //       vertical: 10,
-            //     ),
-            //     decoration: BoxDecoration(
-            //       gradient: LinearGradient(
-            //         begin: Alignment.topCenter,
-            //         end: Alignment.bottomCenter,
-            //         colors: [
-            //           Colors.black.withOpacity(0.65),
-            //           Colors.transparent,
-            //         ],
-            //       ),
-            //     ),
-            //     child:
-            //   ),
-            // ),
             Positioned(
               left: 16,
               right: 16,
@@ -118,8 +98,8 @@ class RecycleBinViewerScreen extends StatelessWidget {
                         icon: const Icon(Icons.restore),
                         label: const Text("Restore"),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xff222222),
+                          backgroundColor: AppColors.surface(Colors.white),
+                          foregroundColor: AppColors.fg(const Color(0xff222222)),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -195,39 +175,20 @@ class RecycleBinViewerScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          title: Text(
-            "Delete permanently?",
-            style: TextStyle(fontSize: 18, fontFamily: FontFamily.robotoBold),
-          ),
-          content: Text(
-            "This item will be permanently deleted and cannot be restored.",
-            style: TextStyle(
-              fontSize: 14,
-              fontFamily: FontFamily.robotoRegular,
-            ),
-          ),
+        return ChromeDialog(
+          title: 'Delete permanently?',
+          message:
+              'This item will be permanently deleted and cannot be restored.',
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text("Cancel"),
+            ChromeButton.cancel(
+              onPressed: () => Navigator.pop(dialogContext),
             ),
-            TextButton(
+            ChromeButton.danger(
+              label: 'Delete',
               onPressed: () async {
                 Navigator.pop(dialogContext);
-
                 await _deleteAndOpenNext();
               },
-              child: const Text(
-                "Delete",
-                style: TextStyle(color: Colors.red),
-              ),
             ),
           ],
         );
@@ -239,48 +200,17 @@ class RecycleBinViewerScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          title: Text(
-            "Restore file?",
-            style: TextStyle(
-              fontSize: 18,
-              fontFamily: FontFamily.robotoBold,
-              color: const Color(0xff222222),
-            ),
-          ),
-          content: Text(
-            "Are you sure you want to restore this file?",
-            style: TextStyle(
-              fontSize: 14,
-              fontFamily: FontFamily.robotoRegular,
-              color: const Color(0xff555555),
-            ),
-          ),
+        return ChromeDialog(
+          title: 'Restore file?',
+          message: 'Are you sure you want to restore this file?',
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: Text(
-                "Cancel",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff555555),
-                ),
-              ),
+            ChromeButton.cancel(
+              onPressed: () => Navigator.pop(dialogContext),
             ),
-
-            TextButton(
+            ChromeButton.ok(
               onPressed: () async {
                 Navigator.pop(dialogContext);
-
                 final success = await recycleBinController.restoreItem(item);
-
                 if (success) {
                   if (Get.isRegistered<PhotosController>()) {
                     final photosController = Get.find<PhotosController>();
@@ -289,14 +219,6 @@ class RecycleBinViewerScreen extends StatelessWidget {
                   Get.back();
                 }
               },
-              child: Text(
-                "OK",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontFamily: FontFamily.robotoMedium,
-                  color: const Color(0xff333333),
-                ),
-              ),
             ),
           ],
         );
@@ -307,7 +229,6 @@ class RecycleBinViewerScreen extends StatelessWidget {
   Future<void> _deleteAndOpenNext() async {
     final controller = recycleBinController;
 
-    // Current item ka index
     final currentIndex = controller.recycleItems.indexWhere(
           (e) => e.id == item.id,
     );
@@ -317,23 +238,19 @@ class RecycleBinViewerScreen extends StatelessWidget {
       return;
     }
 
-    // Current ke BAAD wali image pehle save karo
     RecycleBinItem? nextItem;
 
     if (currentIndex + 1 < controller.recycleItems.length) {
       nextItem = controller.recycleItems[currentIndex + 1];
     }
 
-    // Current image delete karo
     final success = await controller.permanentlyDelete(item);
 
     if (!success) {
       return;
     }
 
-    // Next image available hai
     if (nextItem != null) {
-      // Current viewer ko directly next viewer se replace karo
       Get.off(
             () => RecycleBinViewerScreen(
           item: nextItem!,
@@ -341,7 +258,6 @@ class RecycleBinViewerScreen extends StatelessWidget {
         preventDuplicates: false,
       );
     } else {
-      // Last image thi -> Recycle Bin screen
       Get.back();
     }
   }

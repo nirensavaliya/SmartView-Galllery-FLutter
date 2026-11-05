@@ -2,6 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
+import 'package:gallery_photos/View/Widget/ChromeDialog.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 
 class PhotoEditResult {
@@ -30,82 +33,66 @@ class PhotoEditScreen extends StatelessWidget {
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        bool dontAskAgain = false;
+        final RxBool dontAskAgain = false.obs;
 
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text(
-                "Save file?",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              content: Column(
+        return Builder(
+          builder: (context) {
+            return ChromeDialog(
+              title: 'Save file?',
+              message:
+                  'If you choose to replace the original, the original will be moved to Recently Deleted and kept there for 30 days.',
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    "If you choose to replace the original, "
-                        "the original will be moved to Recently Deleted "
-                        "and kept there for 30 days.",
-                  ),
-
-                  const SizedBox(height: 16),
-
                   Row(
                     children: [
-                      Checkbox(
-                        value: dontAskAgain,
-                        onChanged: (value) {
-                          setState(() {
-                            dontAskAgain = value ?? false;
-                          });
-                        },
-                      ),
-                      const Expanded(
-                        child: Text(
-                          "Don't ask again",
+                      Obx(
+                        () => Checkbox(
+                          value: dontAskAgain.value,
+                          activeColor: InnerChrome.accent,
+                          side: BorderSide(color: InnerChrome.faint, width: 1.4),
+                          onChanged: (value) {
+                            dontAskAgain.value = value ?? false;
+                          },
                         ),
+                      ),
+                      Expanded(
+                        child: Text("Don't ask again", style: ChromeText.row),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  ChromeButton.ok(
+                    label: 'Save file',
+                    onPressed: () {
+                      Navigator.pop(
+                        context,
+                        PhotoEditResult(
+                          bytes: bytes,
+                          replaceOriginal: false,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  ChromeButton.danger(
+                    label: 'Replace file',
+                    onPressed: () {
+                      Navigator.pop(
+                        context,
+                        PhotoEditResult(
+                          bytes: bytes,
+                          replaceOriginal: true,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  ChromeButton.cancel(
+                    onPressed: () => Navigator.pop(context),
+                  ),
                 ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
-                  child: const Text("Cancel"),
-                ),
-
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(
-                      context,
-                      PhotoEditResult(
-                        bytes: bytes,
-                        replaceOriginal: false,
-                      ),
-                    );
-                  },
-                  child: const Text("Save file"),
-                ),
-
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(
-                      context,
-                      PhotoEditResult(
-                        bytes: bytes,
-                        replaceOriginal: true,
-                      ),
-                    );
-                  },
-                  child: const Text("Replace file"),
-                ),
-              ],
             );
           },
         );

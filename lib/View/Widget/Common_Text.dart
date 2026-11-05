@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class CommonText extends StatelessWidget {
   final String text;
@@ -12,8 +13,7 @@ class CommonText extends StatelessWidget {
   final double? height;
   final double? letterSpacing;
 
-
-  const CommonText({
+const CommonText({
     super.key,
     required this.text,
     this.fontSize = 16,
@@ -36,7 +36,7 @@ class CommonText extends StatelessWidget {
       textAlign: textAlign,
       style: TextStyle(
         fontSize: fontSize,
-        color: color,
+        color: AppColors.fg(color),
         fontFamily: fontFamily,
         fontWeight: fontWeight,
         height: height,

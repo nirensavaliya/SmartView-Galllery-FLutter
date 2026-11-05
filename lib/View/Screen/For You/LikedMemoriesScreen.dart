@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
 import 'package:gallery_photos/View/Constant/App_font.dart';
 import 'package:gallery_photos/View/Constant/Get_Storage.dart';
 import 'package:gallery_photos/View/Screen/For%20You/MemoryShareScreen.dart';
@@ -8,6 +9,7 @@ import 'package:get/get.dart';
 import 'package:gallery_photos/View/Screen/For%20You/MemoryDetailScreen.dart';
 import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class LikedMemoriesScreen extends StatelessWidget {
   final List<MemoryGroup> memories;
@@ -88,23 +90,35 @@ class LikedMemoriesScreen extends StatelessWidget {
       _groupByMonthFromList(likedMemories);
 
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.page,
 
         appBar: AppBar(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-
+          backgroundColor: InnerChrome.page,
+          foregroundColor: InnerChrome.ink,
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-            onPressed: () {
-              Get.back();
-            },
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: InnerChrome.alt,
+                shape: BoxShape.circle,
+                border: Border.all(color: InnerChrome.line),
+              ),
+              child: GestureDetector(
+                child: const Icon(Icons.arrow_back_ios_new, size: 20),
+                onTap: () {
+                  Get.back();
+                },
+              ),
+            ),
           ),
           title: Text(
             'Liked Memories',
             style: TextStyle(
-              color: Colors.black,
+              fontFamily: 'Plus Jakarta Sans',
+              color: InnerChrome.ink,
               fontSize: 20,
               fontWeight: FontWeight.w600,
             ),
@@ -113,11 +127,12 @@ class LikedMemoriesScreen extends StatelessWidget {
         ),
 
         body: likedMemories.isEmpty
-            ? const Center(
+            ? Center(
           child: Text(
             'No liked memories',
             style: TextStyle(
-              color: Colors.black54,
+              fontFamily: 'Plus Jakarta Sans',
+              color: InnerChrome.muted,
               fontSize: 16,
             ),
           ),
@@ -158,9 +173,10 @@ class LikedMemoriesScreen extends StatelessWidget {
                   child: Text(
                     '${_monthName(monthDate.month)} '
                         '${monthDate.year}',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 22,
+                    style: TextStyle(
+                      color: InnerChrome.ink,
+                      fontSize: 18,
+                      fontFamily: 'Plus Jakarta Sans',
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -187,8 +203,6 @@ class LikedMemoriesScreen extends StatelessWidget {
                             assets: memory.assets,
                             initialIndex: 0,
 
-                            // Important:
-                            // liked memories hi pass
                             memories: likedMemories,
 
                             currentMemory: memory,
@@ -270,7 +284,7 @@ class _LikedMemoryCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: Colors.grey.shade200,
+          color: InnerChrome.alt,
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -288,7 +302,7 @@ class _LikedMemoryCard extends StatelessWidget {
                   ) {
                 if (!snapshot.hasData) {
                   return Container(
-                    color: Colors.grey.shade300,
+                    color: InnerChrome.alt,
                   );
                 }
 
@@ -300,7 +314,6 @@ class _LikedMemoryCard extends StatelessWidget {
               },
             ),
 
-            // Bottom gradient
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -317,7 +330,6 @@ class _LikedMemoryCard extends StatelessWidget {
               ),
             ),
 
-            // Bottom information
             Positioned(
               left: 8,
               right: 8,
@@ -330,7 +342,7 @@ class _LikedMemoryCard extends StatelessWidget {
                   bottom: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.30),
+                  color: AppColors.surface(Colors.black.withOpacity(0.30)),
                   borderRadius:
                   BorderRadius.circular(10),
                 ),
@@ -361,9 +373,8 @@ class _LikedMemoryCard extends StatelessWidget {
                             overflow:
                             TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                                fontFamily: FontFamily.robotoRegular
+                                fontFamily: 'Plus Jakarta Sans',
+                                color: Colors.white70,
 
                             ),
                           ),
@@ -371,7 +382,6 @@ class _LikedMemoryCard extends StatelessWidget {
                       ),
                     ),
 
-                    // LIKE
                     IconButton(
                       onPressed: () {
                         controller.toggleMemoryLike(
@@ -492,43 +502,51 @@ class _LikedMemoryCard extends StatelessWidget {
       context: context,
       position: position,
       elevation: 8,
-      color: Colors.white,
+      color: InnerChrome.sheet,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       constraints: const BoxConstraints(minWidth: 155, maxWidth: 155),
       items: [
         PopupMenuItem<String>(
           value: 'share',
           height: 42,
-          child: const Text(
+          child: Text(
             'Share',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(
+                fontFamily: 'Plus Jakarta Sans',
+                color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'rename',
           height: 42,
-          child: const Text(
+          child: Text(
             'Rename',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(
+                fontFamily: 'Plus Jakarta Sans',
+                color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'cover',
           height: 42,
-          child: const Text(
+          child: Text(
             'Change Cover',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(
+                fontFamily: 'Plus Jakarta Sans',
+                color: InnerChrome.ink, fontSize: 13),
           ),
         ),
 
         PopupMenuItem<String>(
           value: 'delete',
           height: 42,
-          child: const Text(
+          child: Text(
             'Delete Memory',
-            style: TextStyle(color: Colors.black87, fontSize: 13),
+            style: TextStyle(
+                fontFamily: 'Plus Jakarta Sans',
+                color: InnerChrome.ink, fontSize: 13),
           ),
         ),
       ],
@@ -567,7 +585,7 @@ class _LikedMemoryCard extends StatelessWidget {
 
     Get.dialog(
       Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.sheet,
         insetPadding: const EdgeInsets.symmetric(horizontal: 32),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: Padding(
@@ -577,12 +595,13 @@ class _LikedMemoryCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
 
-              const Text(
+              Text(
                 'Rename',
                 style: TextStyle(
-                  color: Colors.black87,
+                  color: InnerChrome.ink,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
+                  fontFamily: 'Plus Jakarta Sans',
                 ),
               ),
 
@@ -590,12 +609,13 @@ class _LikedMemoryCard extends StatelessWidget {
               TextField(
                 controller: nameController,
                 autofocus: true,
+                style: TextStyle(color: InnerChrome.ink, fontSize: 14),
                 maxLines: 1,
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   hintText: 'Enter memory name',
-                  hintStyle: const TextStyle(
-                    color: Colors.black45,
+                  hintStyle: TextStyle(
+                    color: InnerChrome.muted,
                     fontSize: 14,
                   ),
                   contentPadding: const EdgeInsets.symmetric(
@@ -604,11 +624,11 @@ class _LikedMemoryCard extends StatelessWidget {
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
+                    borderSide: BorderSide(color: InnerChrome.line),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(9),
-                    borderSide: const BorderSide(color: Colors.black54),
+                    borderSide: BorderSide(color: InnerChrome.accent),
                   ),
                 ),
                 onSubmitted: (_) {
@@ -629,16 +649,18 @@ class _LikedMemoryCard extends StatelessWidget {
                           Get.back();
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: InnerChrome.alt,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Cancel',
                           style: TextStyle(
-                            color: Colors.black87,
+                            color: InnerChrome.ink,
                             fontSize: 13,
+                            fontFamily: 'Plus Jakarta Sans',
+
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -656,7 +678,7 @@ class _LikedMemoryCard extends StatelessWidget {
                           _renameMemory(nameController, memory);
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.black87,
+                          backgroundColor: InnerChrome.accent,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
@@ -665,6 +687,7 @@ class _LikedMemoryCard extends StatelessWidget {
                           'Rename',
                           style: TextStyle(
                             color: Colors.white,
+                            fontFamily: 'Plus Jakarta Sans',
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -710,7 +733,7 @@ class _LikedMemoryCard extends StatelessWidget {
       ) {
     Get.dialog(
       Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: InnerChrome.sheet,
         insetPadding: const EdgeInsets.symmetric(
           horizontal: 16,
         ),
@@ -727,15 +750,13 @@ class _LikedMemoryCard extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // =========================
-              // TITLE
-              // =========================
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Do you want to delete this memory?',
                   style: TextStyle(
-                    color: Colors.black87,
+                    fontFamily: 'Plus Jakarta Sans',
+                    color: InnerChrome.ink,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -744,9 +765,6 @@ class _LikedMemoryCard extends StatelessWidget {
 
               const SizedBox(height: 18),
 
-              // =========================
-              // BUTTONS
-              // =========================
               Row(
                 children: [
                   Expanded(
@@ -757,17 +775,18 @@ class _LikedMemoryCard extends StatelessWidget {
                           Get.back();
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: Colors.grey.shade200,
+                          backgroundColor: InnerChrome.alt,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Cancel',
                           style: TextStyle(
-                            color: Colors.black87,
+                            color: InnerChrome.ink,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
+                            fontFamily: 'Plus Jakarta Sans',
                           ),
                         ),
                       ),
@@ -784,7 +803,7 @@ class _LikedMemoryCard extends StatelessWidget {
                           _deleteMemory(memory);
                         },
                         style: TextButton.styleFrom(
-                          backgroundColor: const Color(0xff29262A),
+                          backgroundColor: InnerChrome.danger,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
@@ -796,6 +815,7 @@ class _LikedMemoryCard extends StatelessWidget {
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
+                            fontFamily: 'Plus Jakarta Sans',
                           ),
                         ),
                       ),
@@ -828,16 +848,13 @@ class _LikedMemoryCard extends StatelessWidget {
     final Set<String> deletedIds =
     savedDeleted.map((e) => e.toString()).toSet();
 
-    // Is memory ko deleted mark karo
     deletedIds.add(memoryKey);
 
-    // Permanently save
     await GetStorageData.saveObject(
       GetStorageData.deletedMemories,
       deletedIds.toList(),
     );
 
-    // Rename data bhi remove kar do
     final Map<String, dynamic> savedNames =
     Map<String, dynamic>.from(
       GetStorageData.readObject(
@@ -853,11 +870,9 @@ class _LikedMemoryCard extends StatelessWidget {
       savedNames,
     );
 
-    // Current screen se immediately remove
     controller.memories.remove(memory);
     controller.memories.refresh();
 
-    // Dialog close
     Get.back();
   }
 }

@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/WallpaperController.dart';
 import 'package:get/get.dart';
 import 'package:wallpaper_manager_flutter/wallpaper_manager_flutter.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
+import 'package:gallery_photos/View/Constant/InnerChrome.dart';
+import 'package:gallery_photos/View/Widget/ChromeDialog.dart';
 
 class WallpaperScreen extends StatelessWidget {
   final File imageFile;
@@ -25,9 +28,6 @@ class WallpaperScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // =====================================================
-            // APP BAR
-            // =====================================================
             Container(
               height: 52,
               color: const Color(0xff151515),
@@ -57,9 +57,6 @@ class WallpaperScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // =================================================
-                  // CHECK
-                  // =================================================
                   IconButton(
                     onPressed: () => _showWallpaperDialog(context, controller),
                     icon: const Icon(
@@ -69,13 +66,10 @@ class WallpaperScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // =================================================
-                  // MORE POPUP
-                  // =================================================
                   PopupMenuButton<String>(
                     padding: EdgeInsets.zero,
 
-                    color: Colors.white,
+                    color: AppColors.surface(Colors.white),
 
                     elevation: 4,
 
@@ -102,20 +96,20 @@ class WallpaperScreen extends StatelessWidget {
                         child: Obx(
                           () => Row(
                             children: [
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   "Allow changing the aspect ratio",
                                   style: TextStyle(
                                     fontSize: 15,
-                                    color: Colors.black87,
+                                    color: AppColors.fg(Colors.black87),
                                   ),
                                 ),
                               ),
 
                               if (controller.allowAspectRatio.value)
-                                const Icon(
+                                Icon(
                                   Icons.check,
-                                  color: Colors.black87,
+                                  color: AppColors.fg(Colors.black87),
                                   size: 20,
                                 ),
                             ],
@@ -128,9 +122,6 @@ class WallpaperScreen extends StatelessWidget {
               ),
             ),
 
-            // =====================================================
-            // IMAGE / CROP
-            // =====================================================
             Expanded(
               child: Obx(() {
                 if (controller.isLoadingImage.value) {
@@ -155,9 +146,6 @@ class WallpaperScreen extends StatelessWidget {
               }),
             ),
 
-            // =====================================================
-            // BOTTOM BAR
-            // =====================================================
             Container(
               height: 60,
               color: const Color(0xff171b29),
@@ -198,11 +186,7 @@ class WallpaperScreen extends StatelessWidget {
     );
   }
 
-  // ===========================================================
-  // CROP AREA UI
-  // ===========================================================
-
-  Widget _buildCropArea(
+Widget _buildCropArea(
     BuildContext context,
     WallpaperController controller,
     ui.Image image,
@@ -239,9 +223,6 @@ class WallpaperScreen extends StatelessWidget {
 
         child: Stack(
           children: [
-            // =====================================================
-            // IMAGE
-            // =====================================================
             Positioned.fill(
               child: Transform.rotate(
                 angle: controller.rotation.value * math.pi / 180,
@@ -254,9 +235,6 @@ class WallpaperScreen extends StatelessWidget {
               ),
             ),
 
-            // =====================================================
-            // CROP SQUARE
-            // =====================================================
             Positioned(
               left: controller.cropX.value,
 
@@ -267,9 +245,6 @@ class WallpaperScreen extends StatelessWidget {
               height: controller.cropSize.value,
 
               child: GestureDetector(
-                // =================================================
-                // MOVE
-                // =================================================
                 onPanUpdate: (details) {
                   controller.moveCrop(
                     details.delta.dx,
@@ -281,16 +256,10 @@ class WallpaperScreen extends StatelessWidget {
 
                 child: Stack(
                   children: [
-                    // =============================================
-                    // WHITE BORDER
-                    // =============================================
                     Positioned.fill(
                       child: CustomPaint(painter: _CropPainter()),
                     ),
 
-                    // =============================================
-                    // TOP LEFT
-                    // =============================================
                     _resizeHandle(
                       controller,
                       "topLeft",
@@ -300,9 +269,6 @@ class WallpaperScreen extends StatelessWidget {
                       top: -10,
                     ),
 
-                    // =============================================
-                    // TOP RIGHT
-                    // =============================================
                     _resizeHandle(
                       controller,
                       "topRight",
@@ -312,9 +278,6 @@ class WallpaperScreen extends StatelessWidget {
                       top: -10,
                     ),
 
-                    // =============================================
-                    // BOTTOM LEFT
-                    // =============================================
                     _resizeHandle(
                       controller,
                       "bottomLeft",
@@ -324,9 +287,6 @@ class WallpaperScreen extends StatelessWidget {
                       bottom: -10,
                     ),
 
-                    // =============================================
-                    // BOTTOM RIGHT
-                    // =============================================
                     _resizeHandle(
                       controller,
                       "bottomRight",
@@ -345,11 +305,7 @@ class WallpaperScreen extends StatelessWidget {
     );
   }
 
-  // ===========================================================
-  // RESIZE HANDLE
-  // ===========================================================
-
-  Widget _resizeHandle(
+Widget _resizeHandle(
     WallpaperController controller,
     String corner,
     double displayWidth,
@@ -386,11 +342,7 @@ class WallpaperScreen extends StatelessWidget {
     );
   }
 
-  // ===========================================================
-  // WALLPAPER DIALOG
-  // ===========================================================
-
-  Future<void> _showWallpaperDialog(
+Future<void> _showWallpaperDialog(
     BuildContext context,
     WallpaperController controller,
   ) async {
@@ -398,63 +350,42 @@ class WallpaperScreen extends StatelessWidget {
       context: context,
 
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-
-          title: const Text(
-            "Set wallpaper",
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-
-          content: Obx(
-            () => Column(
+        return Obx(
+          () => ChromeDialog(
+            title: 'Set wallpaper',
+            child: Column(
               mainAxisSize: MainAxisSize.min,
-
               children: [
-                // ===============================================
-                // HOME
-                // ===============================================
                 RadioListTile<int>(
                   value: WallpaperManagerFlutter.homeScreen,
-
                   groupValue: controller.selectedLocation.value,
-
-                  title: const Text("Home screen"),
-
+                  activeColor: InnerChrome.accent,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Home screen', style: ChromeText.row),
                   onChanged: (value) {
                     if (value != null) {
                       controller.selectWallpaperLocation(value);
                     }
                   },
                 ),
-
-                // ===============================================
-                // LOCK
-                // ===============================================
                 RadioListTile<int>(
                   value: WallpaperManagerFlutter.lockScreen,
-
                   groupValue: controller.selectedLocation.value,
-
-                  title: const Text("Lock screen"),
-
+                  activeColor: InnerChrome.accent,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Lock screen', style: ChromeText.row),
                   onChanged: (value) {
                     if (value != null) {
                       controller.selectWallpaperLocation(value);
                     }
                   },
                 ),
-
-                // ===============================================
-                // BOTH
-                // ===============================================
                 RadioListTile<int>(
                   value: WallpaperManagerFlutter.bothScreens,
-
                   groupValue: controller.selectedLocation.value,
-
-                  title: const Text("Both"),
-
+                  activeColor: InnerChrome.accent,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Both', style: ChromeText.row),
                   onChanged: (value) {
                     if (value != null) {
                       controller.selectWallpaperLocation(value);
@@ -463,41 +394,26 @@ class WallpaperScreen extends StatelessWidget {
                 ),
               ],
             ),
+            actions: [
+              ChromeButton.cancel(onPressed: Get.back),
+              ChromeButton.ok(
+                label: 'Apply',
+                onPressed: () {
+                  Get.back();
+                  controller.applyWallpaper();
+                },
+              ),
+            ],
           ),
-
-          actions: [
-            TextButton(
-              onPressed: () {
-                Get.back();
-              },
-              child: const Text("CANCEL"),
-            ),
-
-            ElevatedButton(
-              onPressed: () {
-                Get.back();
-
-                controller.applyWallpaper();
-              },
-              child: const Text("APPLY"),
-            ),
-          ],
         );
       },
     );
   }
 }
 
-// =================================================================
-// CROP PAINTER
-// =================================================================
-
 class _CropPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    // ===========================================================
-    // THIN OUTER BORDER
-    // ===========================================================
 
     final borderPaint = Paint()
       ..color = Colors.white
@@ -509,11 +425,7 @@ class _CropPainter extends CustomPainter {
       borderPaint,
     );
 
-    // ===========================================================
-    // CORNERS
-    // ===========================================================
-
-    final cornerPaint = Paint()
+final cornerPaint = Paint()
       ..color = Colors.white
       ..strokeWidth = 4.0
       ..style = PaintingStyle.stroke
@@ -521,7 +433,6 @@ class _CropPainter extends CustomPainter {
 
     const cornerLength = 16.0;
 
-    // TOP LEFT
     canvas.drawLine(
       const Offset(0, 0),
       const Offset(cornerLength, 0),
@@ -534,7 +445,6 @@ class _CropPainter extends CustomPainter {
       cornerPaint,
     );
 
-    // TOP RIGHT
     canvas.drawLine(
       Offset(size.width, 0),
       Offset(size.width - cornerLength, 0),
@@ -547,7 +457,6 @@ class _CropPainter extends CustomPainter {
       cornerPaint,
     );
 
-    // BOTTOM LEFT
     canvas.drawLine(
       Offset(0, size.height),
       Offset(cornerLength, size.height),
@@ -560,7 +469,6 @@ class _CropPainter extends CustomPainter {
       cornerPaint,
     );
 
-    // BOTTOM RIGHT
     canvas.drawLine(
       Offset(size.width, size.height),
       Offset(size.width - cornerLength, size.height),

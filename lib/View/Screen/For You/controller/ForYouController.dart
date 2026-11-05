@@ -5,13 +5,19 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:gallery_photos/Common/MediaManager.dart';
 import 'package:gallery_photos/View/Constant/Get_Storage.dart';
-import 'package:geocoding/geocoding.dart';
+import 'package:gallery_photos/View/Screen/For%20You/OfflineGeocoder.dart';
+import 'package:gallery_photos/View/Screen/Lock/Controller/BiometricController.dart';
+import 'package:gallery_photos/View/Utils/App_Routes.dart';
 import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:gallery_photos/Common/AppToast.dart';
 
 class ForYouController extends GetxController {
+  final BiometricController biometricController =
+  Get.isRegistered<BiometricController>()
+      ? Get.find<BiometricController>()
+      : Get.put(BiometricController(), permanent: true);
   final RxList<AssetEntity> media = <AssetEntity>[].obs;
 
   final RxList<MemoryGroup> memories = <MemoryGroup>[].obs;
@@ -19,6 +25,7 @@ class ForYouController extends GetxController {
   final RxList<PlaceGroup> places = <PlaceGroup>[].obs;
 
   final Map<String, Future<Uint8List?>> memoryImageCache = {};
+  static const int _maxMemoryImageCache = 30;
   final RxBool isLoading = false.obs;
 
   final RxBool isRefreshing = false.obs;
@@ -28,9 +35,11 @@ class ForYouController extends GetxController {
   final RxString errorMessage = ''.obs;
 
   final ImagePicker _picker = ImagePicker();
-  final Geocoding _geocoding = Geocoding();
 
   static const int pageSize = 100;
+
+  /// Rebuild memories / places after this many extra pages
+  static const int _rebuildEveryPages = 12;
 
   int currentPage = 0;
 
@@ -40,12 +49,45 @@ class ForYouController extends GetxController {
   static const Duration memoryTimeGap = Duration(hours: 6);
   static const double memoryLocationRadiusKm = 2.0;
   static const int minimumMemoryPhotos = 2;
+  final RxInt videosCount = 0.obs;
+  final RxInt screenshotsCount = 0.obs;
+  final RxInt favoritesCount = 0.obs;
+  final RxInt gifsCount = 0.obs;
+  final RxInt livePhotosCount = 0.obs;
+  bool _preloadStarted = false;
 
-  @override
-  void onInit() {
-    super.onInit();
-
+  /// Memories start after the photo pages, or immediately if For You is opened.
+  void startPreload() {
+    if (_preloadStarted || isClosed) return;
+    _preloadStarted = true;
+    unawaited(OfflineGeocoder.instance.warmUp());
     loadForYouMedia();
+  }
+
+  /// Splash waits on this, so For You is already filled when the app opens.
+  Future<void> waitForFirstLoad({
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final Stopwatch sw = Stopwatch()..start();
+
+    // give onInit a moment to flip isLoading to true
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    while (isLoading.value && sw.elapsed < timeout) {
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
+  }
+
+  Future<void> openPrivate() async {
+    try {
+      debugPrint('================ PRIVATE CLICK ================');
+
+      Get.toNamed(AppRoutes.LockScreen);
+    } catch (e) {
+      debugPrint('PRIVATE ERROR = $e');
+
+      AppToast.show("Private Error: ${e.toString()}");
+    }
   }
 
   final RxSet<String> likedMemoryIds = <String>{}.obs;
@@ -55,14 +97,57 @@ class ForYouController extends GetxController {
     if (memoryImageCache.containsKey(id)) {
       return memoryImageCache[id]!;
     }
-
     final Future<Uint8List?> future = asset.thumbnailDataWithSize(
       const ThumbnailSize(1800, 1800),
     );
 
+    if (memoryImageCache.length >= _maxMemoryImageCache) {
+      final oldKeys = memoryImageCache.keys
+          .take(memoryImageCache.length - _maxMemoryImageCache + 1)
+          .toList();
+
+      for (final key in oldKeys) {
+        memoryImageCache.remove(key);
+      }
+    }
+
     memoryImageCache[id] = future;
 
     return future;
+  }
+
+  Future<void> refreshScreenshotAndVideoCounts() async {
+    try {
+      final MediaUtilityCounts counts =
+          await MediaManger.getScreenshotAndVideoCounts();
+      videosCount.value = counts.videos;
+      screenshotsCount.value = counts.screenshots;
+    } catch (e) {
+      debugPrint('UTILITY COUNT ERROR: $e');
+    }
+  }
+
+  Future<void> loadUtilityCounts() async {
+    try {
+      final counts = await MediaManger.getUtilityCounts();
+
+      videosCount.value = counts.videos;
+      screenshotsCount.value = counts.screenshots;
+      favoritesCount.value = counts.favorites;
+      gifsCount.value = counts.gifs;
+      livePhotosCount.value = counts.livePhotos;
+
+      debugPrint('================ UTILITY COUNTS ================');
+      debugPrint('Videos       : ${counts.videos}');
+      debugPrint('Screenshots  : ${counts.screenshots}');
+      debugPrint('Favorites    : ${counts.favorites}');
+      debugPrint('GIFs         : ${counts.gifs}');
+      debugPrint('Live Photos  : ${counts.livePhotos}');
+      debugPrint('GIF + Live   : ${counts.gifsAndLivePhotos}');
+      debugPrint('================================================');
+    } catch (e) {
+      debugPrint('UTILITY COUNT ERROR: $e');
+    }
   }
 
   Future<void> preloadMemoryImages(List<AssetEntity> assets) async {
@@ -70,13 +155,19 @@ class ForYouController extends GetxController {
       return;
     }
 
-    // Saari images ki Future ek baar create hogi.
-    for (final AssetEntity asset in assets) {
-      loadMemoryImage(asset);
-    }
+    const int maxPreload = 4;
 
-    // Background me preload complete kar do.
-    await Future.wait(assets.map((asset) => loadMemoryImage(asset)));
+    final List<AssetEntity> target = assets.length > maxPreload
+        ? assets.sublist(0, maxPreload)
+        : assets;
+
+    for (final AssetEntity asset in target) {
+      try {
+        await loadMemoryImage(asset);
+      } catch (_) {}
+
+      await Future.delayed(const Duration(milliseconds: 1));
+    }
   }
 
   String memoryLikeId(MemoryGroup memory) {
@@ -122,11 +213,6 @@ class ForYouController extends GetxController {
       media.clear();
       memories.clear();
       places.clear();
-      // await _requestMediaLocationPermission();
-
-      // ========================================================
-      // FIRST PAGE
-      // ========================================================
 
       final List<AssetEntity> result = await MediaManger.getAllMedia(
         page: 0,
@@ -139,12 +225,8 @@ class ForYouController extends GetxController {
 
       _addUniqueMedia(firstPage);
 
-      // ========================================================
-      // BUILD SMART MEMORIES
-      // ========================================================
-
       await _rebuildGroups();
-
+      await restoreCustomMemories();
       if (result.length < pageSize) {
         hasMore.value = false;
       }
@@ -157,25 +239,23 @@ class ForYouController extends GetxController {
 
       debugPrint('FOR YOU PLACE GROUPS = ${places.length}');
 
-      // ========================================================
-      // LOAD REST IN BACKGROUND
-      // ========================================================
-
       if (hasMore.value) {
-        unawaited(loadRemainingMedia());
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 1500), () {
+            if (isClosed) return;
+            loadRemainingMedia();
+          }),
+        );
       }
+      await loadUtilityCounts();
     } catch (e, stack) {
       errorMessage.value = e.toString();
-
-      debugPrint('========== FOR YOU LOAD ERROR ==========');
 
       debugPrint('ERROR => $e');
 
       debugPrint(stack.toString());
     } finally {
       isLoading.value = false;
-
-      debugPrint('========== FOR YOU LOAD END ==========');
     }
   }
 
@@ -204,13 +284,24 @@ class ForYouController extends GetxController {
       media.addAll(newAssets);
     }
 
-    // Newest first.
-    media.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
-  }
+    // Newest first. Pages arrive already newest-first, so most of the time
+    // the list is still in order and the (heavy) full sort is skipped.
+    bool inOrder = true;
 
-  // ============================================================
-  // LOAD REMAINING PAGES
-  // ============================================================
+    for (int i = 1; i < media.length; i++) {
+      if ((media[i - 1].createDateSecond ?? 0) <
+          (media[i].createDateSecond ?? 0)) {
+        inOrder = false;
+        break;
+      }
+    }
+
+    if (!inOrder) {
+      media.sort(
+        (a, b) => (b.createDateSecond ?? 0).compareTo(a.createDateSecond ?? 0),
+      );
+    }
+  }
 
   Future<void> loadRemainingMedia() async {
     if (isLoadingMore) {
@@ -225,6 +316,8 @@ class ForYouController extends GetxController {
 
     try {
       int page = 1;
+      bool pendingRebuild = false;
+      int pagesSinceRebuild = 0;
 
       while (hasMore.value) {
         debugPrint('========== FOR YOU LOAD PAGE $page ==========');
@@ -251,12 +344,19 @@ class ForYouController extends GetxController {
 
         debugPrint('PAGE $page NEW IMAGES = $addedCount');
 
-        // ======================================================
-        // REBUILD SMART MEMORIES
-        // ======================================================
-
         if (addedCount > 0) {
+          pendingRebuild = true;
+          pagesSinceRebuild++;
+        }
+
+        // Rebuilding all groups for EVERY page of 100 photos is very heavy.
+        // Do it every few pages, and once more at the end.
+        if (pendingRebuild && pagesSinceRebuild >= _rebuildEveryPages) {
           await _rebuildGroups();
+          await restoreCustomMemories();
+          pendingRebuild = false;
+          pagesSinceRebuild = 0;
+          await Future<void>.delayed(const Duration(milliseconds: 16));
         }
 
         currentPage = page;
@@ -267,6 +367,12 @@ class ForYouController extends GetxController {
         }
 
         page++;
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+
+      if (pendingRebuild) {
+        await _rebuildGroups();
+        await restoreCustomMemories();
       }
     } catch (e, stack) {
       debugPrint('========== FOR YOU BACKGROUND ERROR ==========');
@@ -285,30 +391,27 @@ class ForYouController extends GetxController {
     }
   }
 
-  // ============================================================
-  // REBUILD EVERYTHING
-  // ============================================================
-
   Future<void> _rebuildGroups() async {
     await _loadLocationsForMedia();
 
     await buildMemories();
-    for (final MemoryGroup memory in memories) {
+
+    final int preloadCount = memories.length > 6 ? 6 : memories.length;
+
+    for (int i = 0; i < preloadCount; i++) {
+      final MemoryGroup memory = memories[i];
+
       if (memory.assets.isNotEmpty) {
-        unawaited(preloadMemoryImages(memory.assets));
+        unawaited(preloadMemoryImages(memory.assets.take(1).toList()));
       }
     }
-    buildPlaces();
-
+    await buildPlaces();
     media.refresh();
 
     memories.refresh();
 
     places.refresh();
   }
-  // ============================================================
-  // LOAD LOCATIONS
-  // ============================================================
 
   Future<void> _loadLocationsForMedia() async {
     if (media.isEmpty) {
@@ -325,8 +428,6 @@ class ForYouController extends GetxController {
 
     debugPrint('LOCATION LOAD START = ${assetsToLoad.length}');
 
-    // Small batches me location fetch karo.
-    // Isse ek saath bahut saare platform requests nahi jayenge.
     const int batchSize = 20;
 
     for (int i = 0; i < assetsToLoad.length; i += batchSize) {
@@ -341,22 +442,13 @@ class ForYouController extends GetxController {
 
             _locationCache[asset.id] = location;
 
-            if (location != null) {
-              debugPrint(
-                'LOCATION FOUND => '
-                '${asset.id} | '
-                '${location.latitude}, '
-                '${location.longitude}',
-              );
-            } else {
-              debugPrint('LOCATION NOT FOUND => ${asset.id}');
-            }
+            _locationCache[asset.id] = location;
           } catch (e) {
             _locationCache[asset.id] = null;
 
             debugPrint(
               'LOCATION ERROR => '
-              '${asset.id} | $e',
+                  '${asset.id} | $e',
             );
           }
         }),
@@ -366,38 +458,24 @@ class ForYouController extends GetxController {
     debugPrint('LOCATION LOAD END = ${_locationCache.length}');
   }
 
-  // ============================================================
-  // GET ASSET LOCATION
-  // ============================================================
-
   LatLng? _getLocation(AssetEntity asset) {
     return _locationCache[asset.id];
   }
-
-  // ============================================================
-  // GET LATITUDE
-  // ============================================================
 
   double? _getLatitude(AssetEntity asset) {
     return _getLocation(asset)?.latitude;
   }
 
-  // ============================================================
-  // GET LONGITUDE
-  // ============================================================
-
   double? _getLongitude(AssetEntity asset) {
     return _getLocation(asset)?.longitude;
   }
-  // ============================================================
-  // SMART MEMORY CREATION
-  // ============================================================
 
   Future<void> buildMemories() async {
     final List<AssetEntity> sorted = List<AssetEntity>.from(media);
 
-    // Oldest → newest for grouping.
-    sorted.sort((a, b) => a.createDateTime.compareTo(b.createDateTime));
+    sorted.sort(
+      (a, b) => (a.createDateSecond ?? 0).compareTo(b.createDateSecond ?? 0),
+    );
 
     final List<List<AssetEntity>> groups = [];
 
@@ -414,18 +492,6 @@ class ForYouController extends GetxController {
       final bool closeInTime = _isCloseInTime(previous, asset);
 
       final bool closeInLocation = _isCloseInLocation(previous, asset);
-
-      // ========================================================
-      // MEMORY RULE
-      //
-      // Same activity when:
-      //
-      // 1. Time is close
-      // AND
-      // 2. Location is close
-      //
-      // If GPS is missing, time alone is used.
-      // ========================================================
 
       bool sameMemory;
 
@@ -455,8 +521,9 @@ class ForYouController extends GetxController {
         continue;
       }
 
-      // Newest photo first.
-      group.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+      group.sort(
+        (a, b) => (b.createDateSecond ?? 0).compareTo(a.createDateSecond ?? 0),
+      );
 
       final AssetEntity cover = group.first;
 
@@ -473,7 +540,6 @@ class ForYouController extends GetxController {
       );
     }
 
-    // Newest memories first.
     result.sort((a, b) => b.date.compareTo(a.date));
 
     memories.assignAll(result);
@@ -483,15 +549,115 @@ class ForYouController extends GetxController {
     for (final MemoryGroup memory in memories) {
       debugPrint(
         'MEMORY => ${memory.title} | '
-        '${memory.assets.length} photos | '
-        '${memory.date}',
+            '${memory.assets.length} photos | '
+            '${memory.date}',
       );
     }
   }
 
-  // ============================================================
-  // TIME CHECK
-  // ============================================================
+  Future<void> saveCustomMemory(MemoryGroup memory) async {
+    if (memory.assets.isEmpty) {
+      return;
+    }
+
+    final List<dynamic> saved =
+        GetStorageData.readObject(GetStorageData.customMemories) ?? [];
+
+    final String memoryKey = memory.assets.first.id;
+
+    saved.removeWhere(
+          (item) => item is Map && item['key']?.toString() == memoryKey,
+    );
+
+    saved.add({
+      'key': memoryKey,
+      'title': memory.title,
+      'date': memory.date.toIso8601String(),
+      'assetIds': memory.assets.map((asset) => asset.id).toList(),
+      'latitude': memory.latitude,
+      'longitude': memory.longitude,
+    });
+
+    await GetStorageData.saveObject(GetStorageData.customMemories, saved);
+
+    debugPrint('CUSTOM MEMORY SAVED => ${memory.title}');
+  }
+
+  Future<void> restoreCustomMemories() async {
+    final List<dynamic> saved =
+        GetStorageData.readObject(GetStorageData.customMemories) ?? [];
+
+    if (saved.isEmpty || media.isEmpty) {
+      return;
+    }
+
+    final Map<String, AssetEntity> assetMap = {
+      for (final AssetEntity asset in media) asset.id: asset,
+    };
+
+    final List<MemoryGroup> restoredMemories = [];
+
+    for (final dynamic item in saved) {
+      if (item is! Map) {
+        continue;
+      }
+
+      final List<dynamic> savedAssetIds = item['assetIds'] ?? [];
+
+      final List<AssetEntity> memoryAssets = [];
+
+      for (final dynamic id in savedAssetIds) {
+        final AssetEntity? asset = assetMap[id.toString()];
+
+        if (asset != null) {
+          memoryAssets.add(asset);
+        }
+      }
+
+      if (memoryAssets.isEmpty) {
+        continue;
+      }
+
+      final DateTime date =
+          DateTime.tryParse(item['date']?.toString() ?? '') ??
+              memoryAssets.first.createDateTime;
+
+      restoredMemories.add(
+        MemoryGroup(
+          title: item['title']?.toString() ?? 'Memory',
+          date: date,
+          assets: memoryAssets,
+          latitude: (item['latitude'] as num?)?.toDouble(),
+          longitude: (item['longitude'] as num?)?.toDouble(),
+        ),
+      );
+    }
+
+    if (restoredMemories.isEmpty) {
+      return;
+    }
+
+    final Set<String> customKeys = restoredMemories
+        .map((memory) => memory.assets.isNotEmpty ? memory.assets.first.id : '')
+        .toSet();
+
+    memories.removeWhere(
+          (memory) =>
+      memory.assets.isNotEmpty &&
+          customKeys.contains(memory.assets.first.id),
+    );
+
+    memories.addAll(restoredMemories);
+
+    memories.sort((a, b) => b.date.compareTo(a.date));
+
+    memories.refresh();
+
+    debugPrint(
+      'CUSTOM MEMORIES RESTORED => '
+          '${restoredMemories.length}',
+    );
+  }
 
   bool _isCloseInTime(AssetEntity first, AssetEntity second) {
     final Duration difference = second.createDateTime
@@ -501,13 +667,6 @@ class ForYouController extends GetxController {
     return difference <= memoryTimeGap;
   }
 
-  // ============================================================
-  // LOCATION CHECK
-  // ============================================================
-  // ============================================================
-  // LOCATION CHECK
-  // ============================================================
-
   bool _isCloseInLocation(AssetEntity first, AssetEntity second) {
     final double? lat1 = _getLatitude(first);
     final double? lon1 = _getLongitude(first);
@@ -515,9 +674,6 @@ class ForYouController extends GetxController {
     final double? lat2 = _getLatitude(second);
     final double? lon2 = _getLongitude(second);
 
-    // Agar kisi photo ki location available nahi hai,
-    // to existing behaviour ke according time ke basis
-    // par grouping allow karo.
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
       return true;
     }
@@ -526,10 +682,6 @@ class ForYouController extends GetxController {
 
     return distance <= memoryLocationRadiusKm;
   }
-
-  // ============================================================
-  // HAS LOCATION
-  // ============================================================
 
   bool _hasLocation(AssetEntity asset) {
     final LatLng? location = _getLocation(asset);
@@ -550,23 +702,17 @@ class ForYouController extends GetxController {
 
     final double a =
         math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(rLat1) *
-            math.cos(rLat2) *
-            math.sin(dLon / 2) *
-            math.sin(dLon / 2);
+            math.cos(rLat1) *
+                math.cos(rLat2) *
+                math.sin(dLon / 2) *
+                math.sin(dLon / 2);
 
     final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
 
     return earthRadiusKm * c;
   }
 
-  // double _degreesToRadians(double degrees) {
-  //   return degrees * 3.141592653589793 / 180.0;
-  // }
-
   double sin(double value) {
-    // Small local implementation so no
-    // extra package is required.
     return _sin(value);
   }
 
@@ -581,10 +727,6 @@ class ForYouController extends GetxController {
   double atan2(double y, double x) {
     return _atan2(y, x);
   }
-
-  // ============================================================
-  // MEMORY TITLE
-  // ============================================================
 
   Future<String> _createMemoryTitle(List<AssetEntity> assets) async {
     if (assets.isEmpty) {
@@ -605,15 +747,8 @@ class ForYouController extends GetxController {
       if (locationName != null && locationName.trim().isNotEmpty) {
         return 'A Trip near $locationName';
       }
-
-      // Agar location name fetch nahi ho paya
-      // to coordinates mat dikhana.
       return 'A Trip';
     }
-
-    // ==========================================================
-    // NO LOCATION
-    // ==========================================================
 
     const months = [
       'January',
@@ -635,63 +770,36 @@ class ForYouController extends GetxController {
         '${date.year}';
   }
 
-  // ============================================================
-  // GET LOCATION NAME FROM GPS
-  // ============================================================
-
   Future<String?> _getLocationName(double latitude, double longitude) async {
     try {
+      // ~1 km cache key
       final String cacheKey =
-          '${latitude.toStringAsFixed(3)},'
-          '${longitude.toStringAsFixed(3)}';
+          '${latitude.toStringAsFixed(2)},'
+          '${longitude.toStringAsFixed(2)}';
 
       if (_locationNameCache.containsKey(cacheKey)) {
         return _locationNameCache[cacheKey];
       }
 
-      final List<Placemark> placemarks = await _geocoding
-          .placemarkFromCoordinates(latitude, longitude);
-
-      if (placemarks.isEmpty) {
-        return null;
-      }
-
-      final Placemark place = placemarks.first;
-
-      String? name;
-
-      if (place.locality != null && place.locality!.trim().isNotEmpty) {
-        name = place.locality!.trim();
-      } else if (place.subLocality != null &&
-          place.subLocality!.trim().isNotEmpty) {
-        name = place.subLocality!.trim();
-      } else if (place.subAdministrativeArea != null &&
-          place.subAdministrativeArea!.trim().isNotEmpty) {
-        name = place.subAdministrativeArea!.trim();
-      } else if (place.administrativeArea != null &&
-          place.administrativeArea!.trim().isNotEmpty) {
-        name = place.administrativeArea!.trim();
-      }
-
-      if (name == null || name.isEmpty) {
-        return null;
-      }
-
-      _locationNameCache[cacheKey] = name;
-
-      return name;
-    } catch (e) {
-      debugPrint(
-        'LOCATION NAME ERROR => '
-        '$latitude, $longitude | $e',
+      // 100% on-device lookup. No network, nothing leaves the phone.
+      final String? name = await OfflineGeocoder.instance.nearestPlaceName(
+        latitude,
+        longitude,
       );
+
+      if (name != null && name.trim().isNotEmpty) {
+        _locationNameCache[cacheKey] = name.trim();
+
+        return name.trim();
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('LOCATION NAME ERROR => $latitude, $longitude | $e');
 
       return null;
     }
   }
-  // ============================================================
-  // AVERAGE LATITUDE
-  // ============================================================
 
   double? _averageLatitude(List<AssetEntity> assets) {
     final List<double> values = assets
@@ -705,9 +813,6 @@ class ForYouController extends GetxController {
 
     return values.reduce((a, b) => a + b) / values.length;
   }
-  // ============================================================
-  // AVERAGE LONGITUDE
-  // ============================================================
 
   double? _averageLongitude(List<AssetEntity> assets) {
     final List<double> values = assets
@@ -722,69 +827,130 @@ class ForYouController extends GetxController {
     return values.reduce((a, b) => a + b) / values.length;
   }
 
-  // ============================================================
-  // PLACES
-  // ============================================================
-
-  void buildPlaces() {
-    final Map<String, List<AssetEntity>> grouped = {};
-
-    for (final AssetEntity asset in media) {
-      final double? latitude = _getLatitude(asset);
-      final double? longitude = _getLongitude(asset);
-
-      if (latitude == null || longitude == null) {
-        continue;
-      }
-
-      final String lat = latitude.toStringAsFixed(3);
-      final String lng = longitude.toStringAsFixed(3);
-
-      final String key = '$lat,$lng';
-
-      grouped.putIfAbsent(key, () => <AssetEntity>[]).add(asset);
+  Future<void> buildPlaces() async {
+    if (media.isEmpty) {
+      places.clear();
+      places.refresh();
+      return;
     }
 
-    final List<PlaceGroup> result = [];
+    const double placeRadiusKm = 2.0;
 
-    for (final entry in grouped.entries) {
-      final List<String> parts = entry.key.split(',');
+    // Old logic: the FIRST photo became a fixed anchor and everything within
+    // 2 km of that one point joined it (result depended on photo order, and a
+    // trip with photos spread out got cut in the wrong places).
+    // New logic: photo joins the NEAREST group (not just the first one), and
+    // the group centre moves as photos are added.
+    final List<AssetEntity> sortedMedia = List<AssetEntity>.from(media)
+      ..sort(
+        (a, b) => (b.createDateSecond ?? 0).compareTo(a.createDateSecond ?? 0),
+      );
 
-      if (parts.length != 2) {
+    final List<List<AssetEntity>> buckets = <List<AssetEntity>>[];
+    final List<double> latSum = <double>[];
+    final List<double> lonSum = <double>[];
+
+    for (final AssetEntity asset in sortedMedia) {
+      final LatLng? location = _getLocation(asset);
+
+      if (location == null) {
         continue;
       }
 
-      final double? latitude = double.tryParse(parts[0]);
+      int bestIndex = -1;
+      double bestDistance = double.infinity;
 
-      final double? longitude = double.tryParse(parts[1]);
+      for (int i = 0; i < buckets.length; i++) {
+        final int count = buckets[i].length;
 
-      if (latitude == null || longitude == null) {
+        // A group more than ~0.1 degree (11 km) away in latitude can never
+        // be within 2 km. Skip it without the expensive distance maths.
+        if ((latSum[i] / count - location.latitude).abs() > 0.1) {
+          continue;
+        }
+
+        final double distance = _distanceInKm(
+          latSum[i] / count,
+          lonSum[i] / count,
+          location.latitude,
+          location.longitude,
+        );
+
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = i;
+        }
+      }
+
+      if (bestIndex != -1 && bestDistance <= placeRadiusKm) {
+        buckets[bestIndex].add(asset);
+        latSum[bestIndex] += location.latitude;
+        lonSum[bestIndex] += location.longitude;
+
         continue;
       }
 
-      final List<AssetEntity> items = List<AssetEntity>.from(entry.value);
+      buckets.add(<AssetEntity>[asset]);
+      latSum.add(location.latitude);
+      lonSum.add(location.longitude);
+    }
 
-      items.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+    final List<PlaceGroup> result = <PlaceGroup>[];
 
-      if (items.isEmpty) {
-        continue;
-      }
-
+    for (int i = 0; i < buckets.length; i++) {
       result.add(
-        PlaceGroup(latitude: latitude, longitude: longitude, assets: items),
+        PlaceGroup(
+          latitude: latSum[i] / buckets[i].length,
+          longitude: lonSum[i] / buckets[i].length,
+          assets: buckets[i],
+          title: 'Unknown place',
+        ),
+      );
+    }
+
+    result.removeWhere((place) => place.assets.isEmpty);
+
+    for (final PlaceGroup place in result) {
+      place.assets.sort(
+        (a, b) => (b.createDateSecond ?? 0).compareTo(a.createDateSecond ?? 0),
       );
     }
 
     result.sort((a, b) => b.assets.length.compareTo(a.assets.length));
 
+    for (final PlaceGroup place in result) {
+      try {
+        final String? locationName = await _getLocationName(
+          place.latitude,
+          place.longitude,
+        );
+
+        if (locationName != null && locationName.trim().isNotEmpty) {
+          place.title = locationName.trim();
+        } else {
+          place.title = 'Unknown place';
+        }
+      } catch (e) {
+        debugPrint('PLACE TITLE ERROR => $e');
+
+        place.title = 'Unknown place';
+      }
+    }
+
     places.assignAll(result);
 
-    debugPrint('PLACE GROUPS = ${places.length}');
-  }
+    places.refresh();
 
-  // ============================================================
-  // REFRESH
-  // ============================================================
+    debugPrint('PLACE GROUPS = ${places.length}');
+
+    for (final PlaceGroup place in places) {
+      debugPrint(
+        'PLACE => ${place.title} | '
+            '${place.assets.length} photos | '
+            '${place.latitude}, ${place.longitude}',
+      );
+    }
+  }
 
   Future<void> refreshForYou() async {
     if (isRefreshing.value) {
@@ -815,10 +981,6 @@ class ForYouController extends GetxController {
       debugPrint('========== FOR YOU REFRESH END ==========');
     }
   }
-
-  // ============================================================
-  // CAMERA
-  // ============================================================
 
   Future<void> openCamera() async {
     try {
@@ -868,17 +1030,16 @@ class ForYouController extends GetxController {
       debugPrint(stack.toString());
     }
   }
+
   Future<void> addCustomMemory({
     required String title,
     required List<AssetEntity> assets,
   }) async {
     if (assets.isEmpty) return;
 
-    final String memoryId =
-    DateTime.now().millisecondsSinceEpoch.toString();
+    final String memoryId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    final List<dynamic> savedMemories =
-    List<dynamic>.from(
+    final List<dynamic> savedMemories = List<dynamic>.from(
       GetStorageData.readObject('customMemories') ?? [],
     );
 
@@ -889,10 +1050,7 @@ class ForYouController extends GetxController {
       'assetIds': assets.map((asset) => asset.id).toList(),
     });
 
-    GetStorageData.saveString(
-      'customMemories',
-      savedMemories,
-    );
+    GetStorageData.saveString('customMemories', savedMemories);
 
     memories.insert(
       0,
@@ -907,9 +1065,6 @@ class ForYouController extends GetxController {
 
     memories.refresh();
   }
-  // ============================================================
-  // CLEAR
-  // ============================================================
 
   void clearForYouData() {
     media.clear();
@@ -926,10 +1081,6 @@ class ForYouController extends GetxController {
     errorMessage.value = '';
   }
 
-  // ============================================================
-  // CLOSE
-  // ============================================================
-
   @override
   void onClose() {
     media.clear();
@@ -943,10 +1094,6 @@ class ForYouController extends GetxController {
     super.onClose();
   }
 }
-
-// =================================================================
-// MEMORY MODEL
-// =================================================================
 
 class MemoryGroup {
   String title;
@@ -968,21 +1115,17 @@ class MemoryGroup {
   });
 }
 
-// =================================================================
-// PLACE MODEL
-// =================================================================
-
 class PlaceGroup {
   final double latitude;
-
   final double longitude;
-
   final List<AssetEntity> assets;
+  String title;
 
   PlaceGroup({
     required this.latitude,
     required this.longitude,
     required this.assets,
+    required this.title,
   });
 }
 
@@ -992,9 +1135,6 @@ Set<String> getDeletedMemoryIds() {
 
   return deleted.map((e) => e.toString()).toSet();
 }
-// =================================================================
-// MATH HELPERS
-// =================================================================
 
 double _sin(double x) {
   double term = x;

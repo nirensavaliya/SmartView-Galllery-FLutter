@@ -1,35 +1,51 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:gallery_photos/View/Screen/For%20You/controller/FaceGroupController.dart';
+import 'package:gallery_photos/View/Screen/For%20You/controller/ForYouController.dart';
+import 'package:gallery_photos/View/Screen/Photos/Controller/PhotosController.dart';
 import 'package:get/get.dart';
-import '../../Photos/Controller/PhotosController.dart';
 
 class SplashController extends GetxController {
   late final PhotosController photosController;
 
   final RxBool isLoadingPhotos = true.obs;
 
-  @override
-  void onInit() {
-    super.onInit();
+  bool _started = false;
 
-    // PhotosController ek hi baar create hoga
-    photosController = Get.put(
-      PhotosController(),
-      permanent: true,
+  void startLoading() {
+    if (_started) {
+      return;
+    }
+    _started = true;
+    isLoadingPhotos.value = true;
+
+    photosController = Get.isRegistered<PhotosController>()
+        ? Get.find<PhotosController>()
+        : Get.put(PhotosController(), permanent: true);
+
+    unawaited(
+      photosController.loadInitialMediaFast().whenComplete(() {
+        isLoadingPhotos.value = false;
+        unawaited(_continuePreload());
+      }),
     );
   }
 
-  Future<void> loadPhotos() async {
-    try {
-      isLoadingPhotos.value = true;
-
-      // Splash screen ke time saare photos/videos load honge
-      await photosController.loadInitialMedia();
-
-      isLoadingPhotos.value = false;
-    } catch (e) {
-      debugPrint("Splash Photo Loading Error: $e");
-
-      isLoadingPhotos.value = false;
+  Future<void> _continuePreload() async {
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (Get.isRegistered<PhotosController>()) {
+      await Get.find<PhotosController>().loadRemainingMediaInBackground();
     }
+
+    final ForYouController forYou = Get.isRegistered<ForYouController>()
+        ? Get.find<ForYouController>()
+        : Get.put(ForYouController(), permanent: true);
+    forYou.startPreload();
+    await forYou.waitForFirstLoad();
+
+    final FaceGroupController face = Get.isRegistered<FaceGroupController>()
+        ? Get.find<FaceGroupController>()
+        : Get.put(FaceGroupController(), permanent: true);
+    unawaited(face.startBackgroundScan());
   }
 }

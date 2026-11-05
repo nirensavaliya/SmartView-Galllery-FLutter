@@ -7,6 +7,7 @@ import 'package:gallery_photos/View/Screen/Photos/PhotoViewScreen.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 class VideoViewController extends GetxController {
   final AssetEntity asset;
@@ -37,7 +38,7 @@ class VideoViewController extends GetxController {
       }
       final controller = VideoPlayerController.file(file);
       await controller.initialize();
-      await controller.setLooping(true);
+      await controller.setLooping(false);
       await controller.play();
 
       videoController.value = controller;
@@ -59,10 +60,18 @@ class VideoViewController extends GetxController {
 
     final value = controller.value;
 
-    // Current video position ko continuously update karo
     currentPosition.value = value.position;
 
-    // Play / Pause icon update
+    if (value.duration > Duration.zero && value.position >= value.duration) {
+      if (value.isPlaying) {
+        controller.pause();
+      }
+      isPlaying.value = false;
+      showControls.value = true;
+      hideTimer?.cancel();
+      return;
+    }
+
     isPlaying.value = value.isPlaying;
   }
 
@@ -97,10 +106,6 @@ class VideoViewController extends GetxController {
     final position = controller.value.position;
     final duration = controller.value.duration;
 
-    // =====================================================
-    // VIDEO END HO GAYA HAI
-    // TO PLAY PRESS KARNE PAR STARTING SE PLAY KARO
-    // =====================================================
     if (position >= duration && duration > Duration.zero) {
       await controller.seekTo(Duration.zero);
       await controller.play();
@@ -112,9 +117,6 @@ class VideoViewController extends GetxController {
       return;
     }
 
-    // =====================================================
-    // NORMAL PLAY / PAUSE
-    // =====================================================
     if (controller.value.isPlaying) {
       await controller.pause();
 
@@ -166,7 +168,7 @@ class VideoViewController extends GetxController {
     final double? selected = await showMenu<double>(
       context: context,
       position: positionRect,
-      color: Colors.black87,
+      color: AppColors.surface(Colors.black87),
       elevation: 8,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: [
@@ -219,8 +221,7 @@ class VideoViewController extends GetxController {
     await videoController.value?.setPlaybackSpeed(selected);
   }
 
-
-  Future<void> seekRelative(int seconds) async {
+Future<void> seekRelative(int seconds) async {
     final controller = videoController.value;
 
     if (controller == null || !controller.value.isInitialized) {
@@ -243,8 +244,6 @@ class VideoViewController extends GetxController {
 
     await controller.seekTo(newPosition);
 
-    // Agar video pause hai to pause hi rahe.
-    // Agar video play hai to play continue rahe.
     if (controller.value.isPlaying) {
       await controller.play();
     }
@@ -268,11 +267,7 @@ class VideoViewController extends GetxController {
     );
   }
 
-  // =====================================================
-  // SEEK TO PROGRESS
-  // =====================================================
-
-  Future<void> seekToProgress(double progress) async {
+Future<void> seekToProgress(double progress) async {
     final controller = videoController.value;
 
     if (controller == null || !controller.value.isInitialized) {
@@ -290,11 +285,7 @@ class VideoViewController extends GetxController {
     await controller.seekTo(newPosition);
   }
 
-  // =====================================================
-  // FULL SCREEN
-  // =====================================================
-
-  void toggleFullScreen() {
+void toggleFullScreen() {
     isFullScreen.value = !isFullScreen.value;
 
     if (isFullScreen.value) {
@@ -304,11 +295,7 @@ class VideoViewController extends GetxController {
     }
   }
 
-  // =====================================================
-  // LOCK VIDEO
-  // =====================================================
-
-  void lockVideo() {
+void lockVideo() {
     isLocked.value = true;
 
     showControls.value = false;
@@ -316,11 +303,7 @@ class VideoViewController extends GetxController {
     hideTimer?.cancel();
   }
 
-  // =====================================================
-  // UNLOCK VIDEO
-  // =====================================================
-
-  void unlockVideo() {
+void unlockVideo() {
     isLocked.value = false;
 
     showControls.value = true;
@@ -328,11 +311,7 @@ class VideoViewController extends GetxController {
     startHideTimer();
   }
 
-  // =====================================================
-  // OPEN PHOTO VIEW
-  // =====================================================
-
-  void openPhotoViewWithMiniVideo() {
+void openPhotoViewWithMiniVideo() {
     final controller = videoController.value;
 
     if (controller == null || !controller.value.isInitialized) {
@@ -348,11 +327,7 @@ class VideoViewController extends GetxController {
     );
   }
 
-  // =====================================================
-  // FORMAT DURATION
-  // =====================================================
-
-  String formatDuration(Duration duration) {
+String formatDuration(Duration duration) {
     final int hours = duration.inHours;
 
     final int minutes = duration.inMinutes.remainder(60);
@@ -369,11 +344,7 @@ class VideoViewController extends GetxController {
         "${seconds.toString().padLeft(2, '0')}";
   }
 
-  // =====================================================
-  // CLOSE
-  // =====================================================
-
-  @override
+@override
   void onClose() {
     hideTimer?.cancel();
 

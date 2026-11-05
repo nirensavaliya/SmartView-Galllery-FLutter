@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:gallery_photos/View/Screen/Splash/widgets/SplashLoader.dart';
 import 'package:get/get.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'package:gallery_photos/View/Screen/Albums/Controller/AlbumsController.dart';
 import 'package:gallery_photos/View/Screen/Photos/Controller/PhotoViewController.dart';
+import 'package:gallery_photos/View/Constant/App_Colors.dart';
 
 enum CopyMoveAction { copy, move }
 
@@ -24,11 +26,11 @@ class CopyMoveAlbumScreen extends StatefulWidget {
 }
 
 class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
-  AssetPathEntity? selectedAlbum;
+  final Rxn<AssetPathEntity> selectedAlbum = Rxn<AssetPathEntity>();
 
   late AlbumsController albumsController;
 
-  bool isProcessing = false;
+  final RxBool isProcessing = false.obs;
 
   String get title {
     return widget.action == CopyMoveAction.copy ? "Copy To" : "Move To";
@@ -52,10 +54,6 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
       if (albumsController.albums.isEmpty) {
         await albumsController.loadAlbums();
       }
-
-      if (mounted) {
-        setState(() {});
-      }
     } catch (e) {
       debugPrint("Load Albums Error => $e");
     }
@@ -66,15 +64,13 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
       return;
     }
 
-    setState(() {
-      selectedAlbum = album;
-    });
+    selectedAlbum.value = album;
   }
 
   void _onOk() {
-    final destination = selectedAlbum;
+    final destination = selectedAlbum.value;
 
-    if (destination == null || isProcessing) {
+    if (destination == null || isProcessing.value) {
       return;
     }
 
@@ -83,29 +79,29 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool canContinue = selectedAlbum != null && !isProcessing;
-
     return Scaffold(
-      backgroundColor: const Color(0xfff5f6f7),
+      backgroundColor: AppColors.bg(const Color(0xfff5f6f7)),
 
       appBar: AppBar(
-        backgroundColor: const Color(0xfff5f6f7),
+        backgroundColor: AppColors.bg(const Color(0xfff5f6f7)),
         elevation: 0,
         scrolledUnderElevation: 0,
 
-        leading: IconButton(
-          onPressed: isProcessing ? null : () => Get.back(),
-          icon: const Icon(
-            Icons.arrow_back_ios_new,
-            size: 20,
-            color: Colors.black,
+        leading: Obx(
+          () => IconButton(
+            onPressed: isProcessing.value ? null : () => Get.back(),
+            icon: Icon(
+              Icons.arrow_back_ios_new,
+              size: 20,
+              color: AppColors.fg(Colors.black),
+            ),
           ),
         ),
 
         title: Text(
           title,
-          style: const TextStyle(
-            color: Colors.black,
+          style: TextStyle(
+            color: AppColors.fg(Colors.black),
             fontSize: 17,
             fontWeight: FontWeight.w600,
           ),
@@ -118,7 +114,7 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
             .toList();
 
         if (albums.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: SplashLoader());
         }
 
         return GridView.builder(
@@ -136,12 +132,14 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
           itemBuilder: (context, index) {
             final album = albums[index];
 
-            final bool selected = selectedAlbum?.id == album.id;
+            return Obx(() {
+              final bool selected = selectedAlbum.value?.id == album.id;
 
-            return GestureDetector(
-              onTap: isProcessing ? null : () => _selectAlbum(album),
-              child: _AlbumGridItem(album: album, selected: selected),
-            );
+              return GestureDetector(
+                onTap: isProcessing.value ? null : () => _selectAlbum(album),
+                child: _AlbumGridItem(album: album, selected: selected),
+              );
+            });
           },
         );
       }),
@@ -149,43 +147,48 @@ class _CopyMoveAlbumScreenState extends State<CopyMoveAlbumScreen> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-          child: SizedBox(
-            height: 48,
-            child: ElevatedButton(
-              onPressed: canContinue ? _onOk : null,
+          child: Obx(() {
+            final bool canContinue =
+                selectedAlbum.value != null && !isProcessing.value;
 
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff292727),
+            return SizedBox(
+              height: 48,
+              child: ElevatedButton(
+                onPressed: canContinue ? _onOk : null,
 
-                disabledBackgroundColor: const Color(0xffd5d5d5),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xff292727),
 
-                foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.surface(const Color(0xffd5d5d5)),
 
-                elevation: 0,
+                  foregroundColor: Colors.white,
 
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  elevation: 0,
+
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-              ),
 
-              child: isProcessing
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+                child: isProcessing.value
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        "OK",
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    )
-                  : const Text(
-                      "OK",
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-            ),
-          ),
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -234,7 +237,7 @@ class _AlbumGridItem extends StatelessWidget {
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return Container(
-                        color: Colors.grey.shade200,
+                        color: AppColors.surface(Colors.grey.shade200),
                       );
                     }
 
@@ -251,9 +254,9 @@ class _AlbumGridItem extends StatelessWidget {
                     }
 
                     return Container(
-                      color: Colors.grey.shade200,
-                      child: const Center(
-                        child: Icon(Icons.folder, size: 35, color: Colors.grey),
+                      color: AppColors.surface(Colors.grey.shade200),
+                      child: Center(
+                        child: Icon(Icons.folder, size: 35, color: AppColors.fg(Colors.grey)),
                       ),
                     );
                   },
@@ -275,7 +278,7 @@ class _AlbumGridItem extends StatelessWidget {
               builder: (context, snapshot) {
                 return Text(
                   "${snapshot.data ?? 0}",
-                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 10, color: AppColors.fg(Colors.grey.shade600)),
                 );
               },
             ),
@@ -290,9 +293,9 @@ class _AlbumGridItem extends StatelessWidget {
             height: 23,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: selected ? Colors.black : Colors.white.withOpacity(0.85),
+              color: selected ? Colors.black : AppColors.surface(Colors.white.withOpacity(0.85)),
               border: Border.all(
-                color: selected ? Colors.black : Colors.grey.shade400,
+                color: selected ? AppColors.border(Colors.black) : AppColors.border(Colors.grey.shade400),
                 width: 1.3,
               ),
             ),
